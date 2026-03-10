@@ -1,0 +1,7 @@
+{
+  "name": "HelioFit AI",
+  "description": "Das offizielle HelioFit KI-Portal zur personalisierten Vitalwert-Analyse und Ernährungsoptimierung.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
