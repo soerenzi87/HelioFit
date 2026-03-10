@@ -80,7 +80,7 @@ export interface Exercise {
   name: string;
   sets: number;
   reps: string;
-  rest: string;
+  rest: number;
   notes: string;
   suggestedWeight?: string;
   equipment?: string;
@@ -145,6 +145,7 @@ export interface UserProfile {
   nutritionPreferences?: NutritionPreferences;
   workoutPreferences?: WorkoutPreferences;
   workoutHistory?: WorkoutProgram[];
+  likedRecipes?: Recipe[];
   calorieAdjustment?: number;
   withingsConfig?: WithingsConfig;
   withingsTokens?: {
@@ -180,6 +181,8 @@ export interface Recipe {
   fats: number;
   prepTime: string;
   requiredAppliances: string[];
+  usageCount?: number;
+  isPlannedForWeek?: boolean;
 }
 
 export interface DailyMealPlan {

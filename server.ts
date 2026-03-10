@@ -4,11 +4,43 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import axios from "axios";
+import { Pool } from "pg";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DB_FILE = path.join(__dirname, "db.json");
+// DB Configuration
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || "postgres://heliofit:heliofit_pw@localhost:5432/heliofit_db",
+});
+
+async function initDb() {
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_data (
+        id SERIAL PRIMARY KEY,
+        data JSONB NOT NULL
+      );
+      
+      CREATE TABLE IF NOT EXISTS health_metrics (
+        id SERIAL PRIMARY KEY,
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        metric_type VARCHAR(50) NOT NULL,
+        value NUMERIC NOT NULL,
+        unit VARCHAR(20)
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_health_metrics_time ON health_metrics (timestamp);
+    `);
+    console.log("Database schema initialized.");
+  } catch (error) {
+    console.error("Error initializing database schema:", error);
+  } finally {
+    if (client) client.release();
+  }
+}
 
 // Withings API Config
 const WITHINGS_CLIENT_ID = process.env.WITHINGS_CLIENT_ID;
@@ -17,17 +49,19 @@ const WITHINGS_AUTH_URL = "https://account.withings.com/oauth2_user/authorize2";
 const WITHINGS_TOKEN_URL = "https://wbsapi.withings.net/v2/oauth2";
 
 async function startServer() {
+  await initDb();
+  
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8000;
 
   app.use(express.json({ limit: '50mb' }));
 
   // API Routes
-  app.get("/api/db", (req, res) => {
+  app.get("/api/db", async (req, res) => {
     try {
-      if (fs.existsSync(DB_FILE)) {
-        const data = fs.readFileSync(DB_FILE, "utf-8");
-        res.json(JSON.parse(data));
+      const result = await pool.query("SELECT data FROM user_data ORDER BY id DESC LIMIT 1");
+      if (result.rows.length > 0) {
+        res.json(result.rows[0].data);
       } else {
         res.json({});
       }
@@ -37,9 +71,11 @@ async function startServer() {
     }
   });
 
-  app.post("/api/db", (req, res) => {
+  app.post("/api/db", async (req, res) => {
     try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(req.body, null, 2));
+      // Store the whole document temporarily for backwards compatibility until UI changes
+      // In production, split this into different endpoints and health_metrics table inserts
+      await pool.query("INSERT INTO user_data (data) VALUES ($1)", [req.body]);
       res.json({ status: "ok" });
     } catch (error) {
       console.error("Error writing DB:", error);

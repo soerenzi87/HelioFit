@@ -1,8 +1,12 @@
-
 import { GoogleGenAI, Type, GenerateContentParameters, Modality } from "@google/genai";
 import { UserProfile, AIAnalysis, WeeklyMealPlan, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, Recipe, DailyMealPlan, HealthMetricEntry, HealthInsight, ProgressInsight } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+let ai: any;
+try {
+  ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "dummy" });
+} catch (e) {
+  console.warn("Could not init GoogleGenAI:", e);
+}
 
 const getLangInstruction = (lang: Language) => 
   lang === 'de' 
@@ -19,7 +23,110 @@ function extractJson(text: string): string {
   return jsonMatch ? jsonMatch[0] : cleaned;
 }
 
+let _mockMode = false;
+export function setMockMode(enabled: boolean) { _mockMode = enabled; }
+export function isMockMode(): boolean { return _mockMode || process.env.USE_MOCK_GEMINI === 'true'; }
+
 async function callGeminiWithRetry(params: GenerateContentParameters, maxRetries = 3): Promise<any> {
+  if (isMockMode()) {
+    const prompt = typeof params.contents === 'string' ? params.contents : JSON.stringify(params.contents);
+    
+    if (prompt.includes("Analysiere Gesundheitsprofil") || prompt.includes("targets")) {
+       return { text: JSON.stringify({
+         summary: "MOCK: Du bist auf einem sehr guten Weg! Bleib weiterhin aktiv und achte auf deine Ernährung.",
+         recommendations: ["Trinke ausreichend Wasser", "Achte auf genügend Schlaf", "Integriere mehr Bewegung in deinen Alltag"],
+         targets: { maintenanceCalories: 2500, calories: 2200, protein: 150, carbs: 200, fats: 70, water: 3000 }
+       })};
+    }
+        if (prompt.includes("Erstelle genau") && prompt.includes("Tages-Templates")) {
+        const mockRecipes = [
+          { name: "Skyr mit Beeren & Nüssen", ingredients: ["250 g Skyr", "100 g Beeren", "30 g Mandeln"], instructions: ["Skyr in Schale geben", "Beeren waschen", "Nüsse hacken und drüberstreuen"], calories: 350, protein: 30, carbs: 20, fats: 15, prepTime: "5m", requiredAppliances: [] },
+          { name: "Lachs-Curry mit Reis", ingredients: ["150 g Lachs", "100 g Basmatireis", "200 g Brokkoli", "50 ml Kokosmilch"], instructions: ["Reis kochen", "Lachs würfeln und anbraten", "Brokkoli und Kokosmilch zugeben"], calories: 650, protein: 35, carbs: 55, fats: 25, prepTime: "20m", requiredAppliances: ["Herd", "Pfanne"] },
+          { name: "Vollkorn-Sandwich", ingredients: ["2 Scheiben Vollkornbrot", "50 g Putenbrust", "1/2 Avocado", "Tomaten"], instructions: ["Brot rösten", "Avocado zerdrücken", "Belegen"], calories: 450, protein: 20, carbs: 40, fats: 20, prepTime: "10m", requiredAppliances: ["Toaster"] },
+          { name: "Linsen-Bolognese", ingredients: ["100 g rote Linsen", "80 g Vollkornnudeln", "200 ml Passata", "Karotten"], instructions: ["Nudeln kochen", "Linsen in Tomatensauce weich kochen", "Mischen"], calories: 580, protein: 25, carbs: 90, fats: 8, prepTime: "25m", requiredAppliances: ["Herd"] },
+          { name: "Omelett mit Spinat", ingredients: ["3 Eier", "100 g Blattspinat", "20 g Feta"], instructions: ["Eier verquirlen", "Spinat in Pfanne zusammenfallen lassen", "Eier drübergeben"], calories: 400, protein: 28, carbs: 5, fats: 30, prepTime: "12m", requiredAppliances: ["Pfanne"] }
+        ];
+
+        return { text: JSON.stringify([
+          { templateId: 1, plan: { breakfast: mockRecipes[0], lunch: mockRecipes[1], dinner: mockRecipes[2], snack: mockRecipes[4] } },
+          { templateId: 2, plan: { breakfast: mockRecipes[4], lunch: mockRecipes[3], dinner: mockRecipes[1], snack: mockRecipes[2] } }
+        ])};
+     }
+    
+    if (prompt.includes("Trainingsplan für")) {
+       return { text: JSON.stringify({
+         title: "MOCK: Push/Pull/Legs Split",
+         description: "Ein 3-Tage Push/Pull/Legs Trainingsplan mit progressivem Aufbau.",
+         sessions: [{
+           dayTitle: "Montag: Push (Brust, Schulter, Trizeps)",
+           focus: "Push & Core",
+           duration: "60m",
+           exercises: [
+             { name: "Bankdrücken", sets: 4, reps: "8-10", rest: 120, notes: "Kontrolliertes Absenken", suggestedWeight: "60kg", equipment: "Langhantel", instructions: ["Schulterblätter zusammen", "Stange zur Brust absenken", "Explosiv drücken"] },
+             { name: "Schrägbankdrücken", sets: 3, reps: "10-12", rest: 90, notes: "30° Neigung", suggestedWeight: "20kg", equipment: "Kurzhanteln", instructions: ["Bank auf 30° einstellen", "Hanteln kontrolliert senken"] },
+             { name: "Schulterdrücken", sets: 3, reps: "10-12", rest: 90, notes: "Nicht ins Hohlkreuz", suggestedWeight: "15kg", equipment: "Kurzhanteln", instructions: ["Stehend oder sitzend", "Hanteln über Kopf drücken"] },
+             { name: "Seitheben", sets: 3, reps: "12-15", rest: 60, notes: "Leichtes Gewicht, saubere Form", suggestedWeight: "8kg", equipment: "Kurzhanteln", instructions: ["Leicht vorbeugen", "Arme bis Schulterhöhe heben"] },
+             { name: "Trizeps Dips", sets: 3, reps: "10-12", rest: 60, notes: "Volle Streckung", suggestedWeight: "Körpergewicht", equipment: "Barren", instructions: ["Ellbogen eng am Körper", "Kontrolliert absenken"] }
+           ]
+         }, {
+           dayTitle: "Mittwoch: Pull (Rücken, Bizeps)",
+           focus: "Pull & Grip",
+           duration: "55m",
+           exercises: [
+             { name: "Klimmzüge", sets: 4, reps: "6-8", rest: 120, notes: "Schulterbreiter Griff", suggestedWeight: "Körpergewicht", equipment: "Klimmzugstange", instructions: ["Hängen mit gestreckten Armen", "Kinn über die Stange ziehen"] },
+             { name: "Langhantelrudern", sets: 4, reps: "8-10", rest: 90, notes: "Rücken gerade halten", suggestedWeight: "50kg", equipment: "Langhantel", instructions: ["45° Oberkörperneigung", "Stange zum Bauchnabel ziehen"] },
+             { name: "Latzug", sets: 3, reps: "10-12", rest: 90, notes: "Breiter Griff", suggestedWeight: "45kg", equipment: "Kabelzug", instructions: ["Stange zur oberen Brust ziehen", "Kontrolliert zurücklassen"] },
+             { name: "Bizeps Curls", sets: 3, reps: "10-12", rest: 60, notes: "Keine Schwungbewegung", suggestedWeight: "12kg", equipment: "Kurzhanteln", instructions: ["Ellbogen fixiert", "Volle Kontraktion oben"] },
+             { name: "Face Pulls", sets: 3, reps: "15", rest: 60, notes: "Für Schulterstabilität", suggestedWeight: "15kg", equipment: "Kabelzug", instructions: ["Seil auf Gesichtshöhe ziehen", "Schulterblätter zusammen"] }
+           ]
+         }, {
+           dayTitle: "Freitag: Legs (Beine & Core)",
+           focus: "Lower Body & Core",
+           duration: "65m",
+           exercises: [
+             { name: "Kniebeugen", sets: 4, reps: "8-10", rest: 120, notes: "Mindestens parallel", suggestedWeight: "70kg", equipment: "Langhantel", instructions: ["Schulterbreiter Stand", "Hüfte nach hinten/unten", "Knie über Zehenspitzen"] },
+             { name: "Rumänisches Kreuzheben", sets: 4, reps: "8-10", rest: 90, notes: "Dehnung in der Beinrückseite spüren", suggestedWeight: "60kg", equipment: "Langhantel", instructions: ["Leicht gebeugte Knie", "Hüfte nach hinten schieben"] },
+             { name: "Beinpresse", sets: 3, reps: "12-15", rest: 90, notes: "Voller Bewegungsumfang", suggestedWeight: "120kg", equipment: "Maschine", instructions: ["Füße schulterbreit", "Knie nicht durchdrücken"] },
+             { name: "Wadenheben", sets: 4, reps: "15-20", rest: 60, notes: "Volle Streckung oben", suggestedWeight: "Körpergewicht", equipment: "Stufe", instructions: ["Auf Kante stellen", "Fersen maximal senken und heben"] },
+             { name: "Plank", sets: 3, reps: "45-60s", rest: 45, notes: "Körperspannung halten", suggestedWeight: "Körpergewicht", equipment: "Ohne", instructions: ["Unterarmstütz", "Hüfte nicht durchhängen lassen"] }
+           ]
+         }],
+         recoveryTips: ["Genug schlafen (7-9h)", "Aktiv erholen (Spaziergang, Dehnen)", "Ausreichend Protein (1.6-2.2g/kg)", "Mindestens 48h zwischen gleichen Muskelgruppen"]
+       })};
+    }
+    
+    if (prompt.includes("Analysiere Gesundheitstrends")) {
+       return { text: JSON.stringify([
+         { title: "MOCK: Schrittziel erreicht", detail: "Du bist in den letzten Tagen sehr aktiv gewesen.", category: "steps", impact: "positive" },
+         { title: "MOCK: Herzfrequenz normal", detail: "Dein Ruhepuls ist konstant.", category: "vitals", impact: "neutral" },
+         { title: "MOCK: Schlaf optimieren", detail: "Achte auf konstantere Schlafzeiten für bessere Regeneration.", category: "regeneration", impact: "neutral" }
+       ])};
+    }
+    
+    if (prompt.includes("ungeplante Mahlzeit")) {
+       return { text: JSON.stringify({
+         dinner: { name: "Angepasstes Mock Abendessen", ingredients: ["Salat", "Geringere Kohlenhydrate"], instructions: ["Zubereiten"], calories: 300, protein: 20, carbs: 10, fats: 15, prepTime: "10m", requiredAppliances: [] }
+       })};
+    }
+    
+    if (prompt.includes("Analysiere Trainingsfortschritt")) {
+       return { text: "MOCK: Du hast dich in den letzten Einheiten gesteigert. Sehr gut!" };
+    }
+    
+    if (prompt.includes("Trainingsfokus vor")) {
+       return { text: JSON.stringify({ availableDays: ["Montag", "Mittwoch", "Freitag"], suggestion: "MOCK: 3-Tage Ganzkörperplan wird empfohlen." })};
+    }
+    
+    if (prompt.includes("Analysiere den Gesamtfortschritt")) {
+       return { text: JSON.stringify([
+         { title: "MOCK: Gewicht stabil", summary: "Gute Entwicklung", detail: "Dein Gewicht hält sich im Zielbereich.", impact: "positive", category: "weight" }
+       ])};
+    }
+    
+    console.log("Mock Gemini: Unbekannter Prompt", prompt);
+    return { text: "{}" };
+  }
+
   let lastError: any;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -89,10 +196,14 @@ export const generateMealPlan = async (
   const days = preferences.days && preferences.days.length > 0 ? preferences.days : ['Montag'];
   const numTemplates = preferences.planVariety === 'SAME_EVERY_DAY' ? 1 : (preferences.planVariety === 'TWO_DAY_ROTATION' ? 2 : Math.min(days.length, 7));
 
+  const plannedRecipes = profile.likedRecipes?.filter(r => r.isPlannedForWeek) || [];
+
   const prompt = `Erstelle genau ${numTemplates} verschiedene Tages-Templates für einen Ernährungsplan.
   ZIELE PRO TAG: Kalorien: ${targets.calories}, Makros: ${targets.protein}g P, ${targets.carbs}g C, ${targets.fats}g F.
   WICHTIGE REGELN FÜR ZUTATEN: Jede Zutat MUSS im Format "Menge Einheit Name" angegeben werden (z.B. "200 g Skyr").
-  PRÄFERENZEN: ${preferences.preferredIngredients.join(", ")}, AUSSCHLUSS: ${preferences.excludedIngredients.join(", ")}. ${getLangInstruction(lang)}`;
+  PRÄFERENZEN: ${preferences.preferredIngredients.join(", ")}, AUSSCHLUSS: ${preferences.excludedIngredients.join(", ")}.
+  VORHANDENE REZEPTE FÜR DIE WOCHE (Diese MÜSSEN im Wochenplan vorkommen): ${plannedRecipes.map(r => r.name).join(", ")}.
+  ${getLangInstruction(lang)}`;
 
   const response = await callGeminiWithRetry({
     model: 'gemini-3-flash-preview',
@@ -125,9 +236,22 @@ export const generateMealPlan = async (
 
   const templates = JSON.parse(extractJson(response.text));
   const finalWeeklyPlan: WeeklyMealPlan = {};
+  
+  // Distribute planned recipes across days
+  let pIdx = 0;
   days.forEach((day, index) => {
     let tIdx = (preferences.planVariety === 'SAME_EVERY_DAY') ? 0 : (preferences.planVariety === 'TWO_DAY_ROTATION' ? index % 2 : index % templates.length);
-    finalWeeklyPlan[day] = (templates[tIdx] || templates[0]).plan;
+    const dayPlan = { ...(templates[tIdx] || templates[0]).plan };
+    
+    // Replace one meal per day with a planned recipe if available
+    if (pIdx < plannedRecipes.length) {
+      // Find suitable slot (dinner/lunch usually)
+      const slot = index % 2 === 0 ? 'dinner' : 'lunch';
+      dayPlan[slot] = plannedRecipes[pIdx];
+      pIdx++;
+    }
+    
+    finalWeeklyPlan[day] = dayPlan;
   });
   return finalWeeklyPlan;
 };
@@ -156,6 +280,7 @@ export const generateWorkoutPlan = async (
   - Benutze die Wochentage (${availableDays.join("/")}) als Start des 'dayTitle' (z.B. "Montag: Push & Core").
   - Gib für jede Übung an, welches EQUIPMENT (z.B. Langhantel, Kurzhantel, Maschine, Körpergewicht) benötigt wird.
   - Gib für jede Übung eine kurze SCHRITT-FÜR-SCHRITT ANLEITUNG (instructions) an.
+  - Gib für jede Übung die empfohlene PAUSE zwischen Sätzen als ZAHL IN SEKUNDEN an (z.B. 60, 90, 120).
   
   ${getLangInstruction(lang)}`;
 
@@ -182,7 +307,7 @@ export const generateWorkoutPlan = async (
                   name: { type: Type.STRING }, 
                   sets: { type: Type.NUMBER }, 
                   reps: { type: Type.STRING }, 
-                  rest: { type: Type.STRING }, 
+                  rest: { type: Type.NUMBER }, 
                   notes: { type: Type.STRING },
                   suggestedWeight: { type: Type.STRING },
                   equipment: { type: Type.STRING },
@@ -304,6 +429,10 @@ export const analyzeOverallProgress = async (profile: UserProfile, healthData: H
 };
 
 export const generateWorkoutCue = async (text: string): Promise<string | undefined> => {
+  if (isMockMode()) {
+     console.log("Mock TTS prompt:", text);
+     return undefined;
+  }
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",

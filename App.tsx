@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { UserProfile, AIAnalysis, WeeklyMealPlan, FitnessGoal, ActivityLevel, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, DailyMealPlan, WorkoutPreferences, HealthInsight, ProgressInsight } from './types';
+import { UserProfile, AIAnalysis, WeeklyMealPlan, Recipe, FitnessGoal, ActivityLevel, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, DailyMealPlan, WorkoutPreferences, HealthInsight, ProgressInsight } from './types';
 import Dashboard from './components/Dashboard';
 import NutritionTab from './components/NutritionTab';
 import WorkoutTab from './components/WorkoutTab';
@@ -9,7 +9,7 @@ import SettingsTab from './components/SettingsTab';
 import AuthScreen from './components/AuthScreen';
 import UserProfileForm from './components/UserProfileForm';
 import SuperUserAuth from './components/SuperUserAuth';
-import { analyzeHealthData, generateMealPlan, generateWorkoutPlan, analyzeOverallProgress, analyzeHealthTrends } from './services/geminiService';
+import { analyzeHealthData, generateMealPlan, generateWorkoutPlan, analyzeOverallProgress, analyzeHealthTrends, setMockMode } from './services/geminiService';
 import { initGoogleFitAuth, requestGoogleFitAccess, fetchGoogleFitData, revokeGoogleFitAccess } from './services/googleFitService';
 import { getWithingsAuthUrl, fetchWithingsData } from './services/withingsService';
 import { loginHealthBridge, fetchHealthBridgeData } from './services/healthBridgeService';
@@ -551,10 +551,32 @@ const App: React.FC = () => {
                 setWeeklyPlan(d.weeklyPlan || null); 
                 setWorkoutPlan(d.workoutPlan || null); 
                 setHealthInsights(d.healthInsights || []); 
+                setMockMode(false); // Real users get live mode unless env overrides
                 return true; 
               } 
               return false; 
-            }} onRegister={() => setAuthView('register')} language={language} existingUsers={Object.keys(db)} /> : <UserProfileForm onSubmit={handleRegister} onCancel={() => setAuthView('login')} language={language} />
+            }} 
+            onMockLogin={() => {
+              const mockProfile: UserProfile = {
+                name: 'MockUser',
+                age: 30,
+                weight: 80,
+                height: 180,
+                gender: 'male',
+                goals: [FitnessGoal.MUSCLE_GAIN],
+                activityLevel: ActivityLevel.ACTIVE,
+                likedRecipes: [
+                  { name: "Skyr mit Beeren & Nüssen", ingredients: ["250 g Skyr", "100 g Beeren", "30 g Mandeln"], instructions: ["Skyr in Schale geben", "Beeren waschen", "Nüsse hacken und drüberstreuen"], calories: 350, protein: 30, carbs: 20, fats: 15, prepTime: "5m", requiredAppliances: [], usageCount: 5 },
+                  { name: "Lachs-Curry mit Reis", ingredients: ["150 g Lachs", "100 g Basmatireis", "200 g Brokkoli", "50 ml Kokosmilch"], instructions: ["Reis kochen", "Lachs würfeln und anbraten", "Brokkoli und Kokosmilch zugeben"], calories: 650, protein: 35, carbs: 55, fats: 25, prepTime: "20m", requiredAppliances: ["Herd", "Pfanne"], usageCount: 3 }
+                ]
+              };
+              setProfile(mockProfile);
+              setMockMode(true); // Mock user strictly uses mock Gemini
+            }}
+            onRegister={() => setAuthView('register')} 
+            language={language} 
+            existingUsers={Object.keys(db)} 
+          /> : <UserProfileForm onSubmit={handleRegister} onCancel={() => setAuthView('login')} language={language} />
           ) : (
             <div className="space-y-6 animate-fade-in">
               {activeTab === 'overview' && (
@@ -623,7 +645,63 @@ const App: React.FC = () => {
                   language={language}
                 />
               )}
-              {activeTab === 'nutrition' && <NutritionTab weeklyPlan={weeklyPlan} onGeneratePlan={async (pfs) => { setIsGeneratingPlan(true); try { const pl = await generateMealPlan(profile, analysis!.targets, pfs, language); setWeeklyPlan(pl); setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], weeklyPlan: pl}})); } catch(e){} finally {setIsGeneratingPlan(false); } }} onUpdateWeeklyPlan={(d, pl) => setWeeklyPlan(prev => ({...prev, [d]: pl}))} isLoading={isGeneratingPlan} language={language} profile={profile} targets={analysis?.targets} onUpdateProfile={(up) => { setProfile(up); setDb(prev => ({...prev, [up.name]: {...prev[up.name], profile: up}})); }} />}
+              {activeTab === 'nutrition' && (
+                <NutritionTab 
+                  weeklyPlan={weeklyPlan} 
+                  onGeneratePlan={async (pfs) => { 
+                    setIsGeneratingPlan(true); 
+                    try { 
+                      const pl = await generateMealPlan(profile, analysis!.targets, pfs, language); 
+                      setWeeklyPlan(pl); 
+                      
+                      // Increment usageCount for recipes used in the plan
+                      if (profile && profile.likedRecipes) {
+                        const usedRecipeNames = new Set<string>();
+                        Object.values(pl).forEach(day => {
+                          Object.values(day).forEach(meal => {
+                            if (meal && (meal as Recipe).name) {
+                              usedRecipeNames.add((meal as Recipe).name);
+                            }
+                          });
+                        });
+
+                        const updatedLikedRecipes = profile.likedRecipes.map(r => {
+                          if (usedRecipeNames.has(r.name)) {
+                            return { ...r, usageCount: (r.usageCount || 0) + 1 };
+                          }
+                          return r;
+                        });
+
+                        const updatedProfile = { ...profile, likedRecipes: updatedLikedRecipes };
+                        setProfile(updatedProfile);
+                        setDb(prev => ({
+                          ...prev, 
+                          [profile.name]: {
+                            ...prev[profile.name], 
+                            weeklyPlan: pl,
+                            profile: updatedProfile
+                          }
+                        }));
+                      } else {
+                        setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], weeklyPlan: pl}}));
+                      }
+                    } catch(e){
+                      console.error("Failed to generate plan", e);
+                    } finally {
+                      setIsGeneratingPlan(false); 
+                    } 
+                  }} 
+                  onUpdateWeeklyPlan={(d, pl) => setWeeklyPlan(prev => ({...prev, [d]: pl}))} 
+                  isLoading={isGeneratingPlan} 
+                  language={language} 
+                  profile={profile} 
+                  targets={analysis?.targets} 
+                  onUpdateProfile={(up) => { 
+                    setProfile(up); 
+                    setDb(prev => ({...prev, [up.name]: {...prev[up.name], profile: up}})); 
+                  }} 
+                />
+              )}
               {activeTab === 'workout' && <WorkoutTab workoutProgram={workoutPlan} workoutLogs={workoutLogs} onGenerateWorkout={handleGenerateWorkout} onSaveLog={(log) => { const logs = [log, ...workoutLogs]; setWorkoutLogs(logs); setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], logs}})); }} onUpdateProfile={(up) => { setProfile(up); setDb(prev => ({...prev, [up.name]: {...prev[up.name], profile: up}})); }} isLoading={isGeneratingWorkout} language={language} profile={profile} />}
             </div>
           )}

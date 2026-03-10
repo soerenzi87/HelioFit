@@ -7,7 +7,6 @@ import { exportWorkoutToICS } from '../services/calendarService';
 
 declare global {
   interface Window {
-    onYouTubeIframeAPIReady: () => void;
     YT: any;
   }
 }
@@ -44,13 +43,14 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
   const [currentLog, setCurrentLog] = useState<ExerciseLog[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState<string>(workoutProgram?.id || 'current');
 
-  // Music & Timer states
-  const [youtubeUrl, setYoutubeUrl] = useState('');
+  // Timer states
   const [restTimer, setRestTimer] = useState<number | null>(null);
+  const [restExerciseName, setRestExerciseName] = useState<string>('');
+
+  // State for expanded history details
+  const [expandedLogIdx, setExpandedLogIdx] = useState<number | null>(null);
 
   const [activeSet, setActiveSet] = useState<{exIdx: number, sIdx: number} | null>(null);
-  const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
-  const [currentListId, setCurrentListId] = useState<string | null>(null);
   const [selectedExerciseInfo, setSelectedExerciseInfo] = useState<Exercise | null>(null);
 
   useEffect(() => {
@@ -76,28 +76,17 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
     }
   };
 
-  const handleRestStart = (exName: string) => {
-    setRestTimer(60); // Default 60s rest
-    playCue(language === 'de' ? `Satz beendet. Ruh dich aus für 60 Sekunden.` : `Set complete. Rest for 60 seconds.`);
+  const handleRestStart = (exName: string, restSeconds: number | string) => {
+    const parsed = typeof restSeconds === 'string' ? parseInt(restSeconds, 10) : restSeconds;
+    const duration = isNaN(parsed) ? 60 : parsed;
+    setRestTimer(duration);
+    setRestExerciseName(exName);
+    playCue(language === 'de' ? `Satz beendet. Ruh dich aus für ${duration} Sekunden.` : `Set complete. Rest for ${duration} seconds.`);
   };
 
   const handleRestEnd = () => {
+    setRestExerciseName('');
     playCue(language === 'de' ? `Pause vorbei. Nächster Satz!` : `Rest over. Next set!`);
-  };
-
-  const extractIds = (url: string) => {
-    const listMatch = url.match(/[?&]list=([^#\&\?]+)/);
-    const videoMatch = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
-    return {
-      videoId: videoMatch ? videoMatch[1] : null,
-      listId: listMatch ? listMatch[1] : null
-    };
-  };
-
-  const handleLoadMusic = (url: string) => {
-    const { videoId, listId } = extractIds(url);
-    setCurrentVideoId(videoId);
-    setCurrentListId(listId);
   };
 
   // Sync local state to profile when it changes to persist across tab switches
@@ -173,65 +162,23 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
           </div>
         </div>
 
-        {/* Music Control */}
-        <div className="mb-10 p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-6">
-          <div className="flex justify-between items-center">
-            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Workout Music</h4>
-            <span className="text-[10px] font-black text-slate-400 uppercase">YouTube Player</span>
-          </div>
-
-          {/* Embedded Player */}
-          {(currentVideoId || currentListId) && (
-            <div className="aspect-video w-full rounded-2xl overflow-hidden shadow-lg bg-black">
-              <iframe
-                width="100%"
-                height="100%"
-                src={currentListId 
-                  ? `https://www.youtube.com/embed/videoseries?list=${currentListId}&autoplay=1`
-                  : `https://www.youtube.com/embed/${currentVideoId}?autoplay=1`
-                }
-                title="YouTube video player"
-                frameBorder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-              ></iframe>
+        {/* Rest Timer Overlay */}
+        {restTimer !== null && (
+          <div className="mb-10 p-8 bg-gradient-to-br from-orange-500 to-amber-500 rounded-3xl text-white text-center shadow-xl animate-fade-in">
+            <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-2">
+              {language === 'de' ? 'Pause' : 'Rest'} — {restExerciseName}
+            </p>
+            <div className="text-7xl font-black tabular-nums animate-pulse">
+              {Math.floor(restTimer / 60)}:{String(restTimer % 60).padStart(2, '0')}
             </div>
-          )}
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {[
-              { name: 'Phonk', id: 'PL4fGSI1pDJn5v_X_p0o', icon: 'fa-bolt' },
-              { name: 'Hip Hop', id: 'PL4fGSI1pDJn6jWQS_7_7-1e8-7a5-7-7-7', icon: 'fa-fire' },
-              { name: 'Rock', id: 'PL4fGSI1pDJn7_7-1e8-7a5-7-7-7', icon: 'fa-guitar' },
-              { name: 'Techno', id: 'PL4fGSI1pDJn5_7-1e8-7a5-7-7-7', icon: 'fa-wave-square' }
-            ].map((pl) => (
-              <button 
-                key={pl.name}
-                onClick={() => handleLoadMusic(`https://www.youtube.com/playlist?list=${pl.id}`)}
-                className="flex flex-col items-center gap-2 p-3 bg-white rounded-2xl border border-slate-100 hover:border-indigo-500 hover:shadow-md transition-all group"
-              >
-                <i className={`fas ${pl.icon} text-slate-400 group-hover:text-indigo-600 transition-colors`}></i>
-                <span className="text-[9px] font-black uppercase text-slate-600">{pl.name}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-2">
-            <input 
-              type="text" 
-              placeholder="Eigene YouTube URL..." 
-              value={youtubeUrl}
-              onChange={(e) => setYoutubeUrl(e.target.value)}
-              className="flex-1 p-3 bg-white rounded-xl border border-slate-200 text-xs font-bold outline-none"
-            />
             <button 
-              onClick={() => handleLoadMusic(youtubeUrl)}
-              className="w-full sm:w-auto px-4 py-3 sm:py-0 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase"
+              onClick={() => { setRestTimer(null); setRestExerciseName(''); }}
+              className="mt-4 px-6 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/30 transition-all"
             >
-              Laden
+              {language === 'de' ? 'Überspringen' : 'Skip'}
             </button>
           </div>
-        </div>
+        )}
 
         <div className="space-y-12">
           {selectedSession.exercises.map((ex, exIdx) => (
@@ -255,15 +202,15 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                         {isDone && <i className="fas fa-check-circle text-emerald-500"></i>}
                       </div>
                       <div className="flex gap-4">
-                        <div className="flex-1"><label className="text-[8px] font-black text-slate-400 uppercase">{t.weight}</label><input type="number" value={set.weight || ''} onChange={(e) => { const copy = [...currentLog]; copy[exIdx].sets[sIdx].weight = parseFloat(e.target.value) || 0; setCurrentLog(copy); }} className="w-full bg-transparent border-b border-slate-200 focus:border-indigo-500 outline-none font-black text-lg" /></div>
-                        <div className="flex-1"><label className="text-[8px] font-black text-slate-400 uppercase">{t.reps}</label><input type="number" value={set.reps || ''} onChange={(e) => { const copy = [...currentLog]; copy[exIdx].sets[sIdx].reps = parseFloat(e.target.value) || 0; setCurrentLog(copy); }} className="w-full bg-transparent border-b border-slate-200 focus:border-indigo-500 outline-none font-black text-lg" /></div>
+                        <div className="flex-1"><label className="text-[8px] font-black text-slate-400 uppercase">{t.weight}</label><input type="number" placeholder={ex.suggestedWeight?.replace(/[^0-9.]/g, '') || ''} value={set.weight || ''} onChange={(e) => { const copy = [...currentLog]; copy[exIdx].sets[sIdx].weight = parseFloat(e.target.value) || 0; setCurrentLog(copy); }} className="w-full bg-transparent border-b border-slate-200 focus:border-indigo-500 outline-none font-black text-lg placeholder-slate-300" /></div>
+                        <div className="flex-1"><label className="text-[8px] font-black text-slate-400 uppercase">{t.reps}</label><input type="text" placeholder={ex.reps || ''} value={set.reps || ''} onChange={(e) => { const copy = [...currentLog]; copy[exIdx].sets[sIdx].reps = parseFloat(e.target.value) || 0; setCurrentLog(copy); }} className="w-full bg-transparent border-b border-slate-200 focus:border-indigo-500 outline-none font-black text-lg placeholder-slate-300" /></div>
                       </div>
                       {!isDone && (
                         <button 
-                          onClick={() => handleRestStart(ex.name)}
+                          onClick={() => handleRestStart(ex.name, ex.rest)}
                           className="w-full py-2 bg-white border border-slate-200 rounded-xl text-[9px] font-black uppercase text-slate-500 hover:bg-slate-100"
                         >
-                          Satz beenden
+                          {language === 'de' ? `Satz beenden (${ex.rest}s Pause)` : `Finish Set (${ex.rest}s Rest)`}
                         </button>
                       )}
                     </div>
@@ -415,12 +362,18 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                  <button onClick={() => setShowConfig(true)} className="px-6 py-3 bg-white/20 hover:bg-white/30 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-white/30 transition-all">{t.adapt}</button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {workoutProgram.sessions.map((session, i) => (
-                  <div key={i} onClick={() => setSelectedSession(session)} className={`bg-white p-6 rounded-[2rem] border cursor-pointer transition-all hover:shadow-lg ${selectedSession === session ? 'border-indigo-500 ring-4 ring-indigo-500/10' : 'border-slate-100'}`}>
-                    <h4 className="font-black text-slate-900 text-lg mb-4">{session.dayTitle}</h4>
-                    <div className="flex justify-between text-[10px] font-black uppercase text-slate-400 border-t border-slate-50 pt-3"><span>{session.duration}</span><span>{session.exercises.length} Ex.</span></div>
-                  </div>
-                ))}
+                {workoutProgram.sessions.map((session, i) => {
+                  const isCompleted = workoutLogs.some(l => l.sessionTitle === session.dayTitle);
+                  return (
+                    <div key={i} onClick={() => setSelectedSession(session)} className={`p-6 rounded-[2rem] border cursor-pointer transition-all hover:shadow-lg ${selectedSession === session ? 'bg-white border-indigo-500 ring-4 ring-indigo-500/10' : (isCompleted ? 'bg-emerald-50/50 border-emerald-500' : 'bg-white border-slate-100')}`}>
+                      <div className="flex justify-between items-start mb-4">
+                        <h4 className="font-black text-slate-900 text-lg leading-tight">{session.dayTitle}</h4>
+                        {isCompleted && <i className="fas fa-check-circle text-emerald-500 mt-1 text-lg"></i>}
+                      </div>
+                      <div className="flex justify-between text-[10px] font-black uppercase text-slate-400 border-t border-slate-100/50 pt-4"><span>{session.duration}</span><span>{session.exercises.length} Ex.</span></div>
+                    </div>
+                  );
+                })}
               </div>
               {selectedSession && (
                 <div className="bg-white rounded-[3rem] p-8 lg:p-12 border border-slate-100 shadow-xl animate-scale-in">
@@ -429,15 +382,41 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                     <button onClick={() => { setSelectedSession(selectedSession); setIsLiveSession(true); setCurrentLog(selectedSession.exercises.map(ex => ({ exerciseName: ex.name, sets: Array.from({ length: ex.sets }, () => ({ weight: 0, reps: 0 })) }))); }} className="px-10 py-5 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs shadow-xl"><i className="fas fa-play mr-3"></i> {t.start}</button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {selectedSession.exercises.map((ex, i) => (
-                      <div key={i} className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 flex items-center justify-between">
-                        <div className="flex-1"><h5 className="font-black text-slate-900 text-lg">{ex.name}</h5><p className="text-[10px] text-slate-400 italic mt-1">{ex.notes}</p></div>
-                        <div className="flex gap-2">
-                          <div className="bg-white px-4 py-2.5 rounded-xl text-center border border-slate-100"><p className="text-[7px] font-black text-slate-400 uppercase">Sets</p><p className="font-black text-lg">{ex.sets}</p></div>
-                          <div className="bg-white px-4 py-2.5 rounded-xl text-center border border-slate-100"><p className="text-[7px] font-black text-slate-400 uppercase">Reps</p><p className="font-black text-lg">{ex.reps}</p></div>
+                    {selectedSession.exercises.map((ex, i) => {
+                      const sessionLog = workoutLogs.find(l => l.sessionTitle === selectedSession.dayTitle);
+                      const exerciseLog = sessionLog?.exercises.find(le => le.exerciseName === ex.name);
+                      
+                      return (
+                        <div key={i} className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 flex flex-col gap-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <h5 className="font-black text-slate-900 text-lg">{ex.name}</h5>
+                              <p className="text-[10px] text-slate-400 italic mt-1">{ex.notes}</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <div className="bg-white px-4 py-2.5 rounded-xl text-center border border-slate-100"><p className="text-[7px] font-black text-slate-400 uppercase">Sets</p><p className="font-black text-lg">{ex.sets}</p></div>
+                              <div className="bg-white px-4 py-2.5 rounded-xl text-center border border-slate-100"><p className="text-[7px] font-black text-slate-400 uppercase">Reps</p><p className="font-black text-lg">{ex.reps}</p></div>
+                              <div className="bg-white px-4 py-2.5 rounded-xl text-center border border-slate-100"><p className="text-[7px] font-black text-slate-400 uppercase"><i className="fas fa-stopwatch mr-1"></i>{t.rest}</p><p className="font-black text-lg">{ex.rest}s</p></div>
+                            </div>
+                          </div>
+                          
+                          {exerciseLog && (
+                            <div className="pt-4 border-t border-slate-200/50">
+                              <p className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-2 flex items-center gap-1">
+                                <i className="fas fa-history text-[8px]"></i> Letztes Ergebnis:
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                {exerciseLog.sets.map((s, si) => (
+                                  <div key={si} className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-bold border border-emerald-100">
+                                    S{si+1}: {s.weight}kg x {s.reps}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -446,10 +425,57 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
         </div>
       ) : (
         <div className="space-y-8 animate-fade-in">
-          {/* Statistiken hier analog zum vorherigen Turn beibehalten */}
           <div className="bg-white rounded-[3rem] p-8 lg:p-12 border border-slate-100 shadow-xl">
-             <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight mb-8">{t.plannedVsActual}</h3>
-             <div className="h-80 w-full flex items-center justify-center text-slate-300 italic font-medium">Balkendiagramm hier...</div>
+             <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight mb-8">Trainingshistorie</h3>
+             {workoutLogs.length === 0 ? (
+               <div className="h-40 w-full flex items-center justify-center text-slate-300 italic font-medium">Noch keine Trainings absolviert.</div>
+             ) : (
+               <div className="space-y-4">
+                 {workoutLogs.map((log, i) => (
+                   <div key={i} className="space-y-3">
+                     <div 
+                       onClick={() => setExpandedLogIdx(expandedLogIdx === i ? null : i)}
+                       className={`p-6 bg-slate-50 border border-slate-100 rounded-[2rem] flex justify-between items-center transition-all hover:shadow-md cursor-pointer ${expandedLogIdx === i ? 'ring-2 ring-indigo-500' : ''}`}
+                     >
+                       <div>
+                         <h4 className="font-black text-lg text-slate-900">{log.sessionTitle}</h4>
+                         <p className="text-[10px] font-black uppercase text-slate-500 mt-1">{new Date(log.date).toLocaleDateString(language === 'de' ? 'de-DE' : 'en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} • {log.exercises.length} Übungen</p>
+                       </div>
+                       <div className="flex items-center gap-4">
+                         <div className="w-10 h-10 rounded-xl bg-white border border-slate-100 text-slate-400 flex items-center justify-center text-sm">
+                           <i className={`fas fa-chevron-${expandedLogIdx === i ? 'up' : 'down'}`}></i>
+                         </div>
+                         <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center text-xl shadow-sm">
+                           <i className="fas fa-check"></i>
+                         </div>
+                       </div>
+                     </div>
+                     
+                     {expandedLogIdx === i && (
+                       <div className="p-6 bg-white border border-slate-100 rounded-[2rem] shadow-inner space-y-6 animate-fade-in mx-4">
+                         {log.exercises.map((el, exi) => (
+                           <div key={exi} className="pb-4 border-b border-slate-50 last:border-0 last:pb-0">
+                             <h5 className="font-black text-slate-800 text-sm mb-3 flex items-center gap-2">
+                               <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
+                               {el.exerciseName}
+                             </h5>
+                             <div className="flex flex-wrap gap-2 pl-4">
+                               {el.sets.map((s, si) => (
+                                 <div key={si} className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-xl flex flex-col items-center min-w-[60px]">
+                                   <span className="text-[7px] font-black text-slate-400 uppercase mb-1">S{si+1}</span>
+                                   <span className="text-xs font-black text-slate-700">{s.weight}kg</span>
+                                   <span className="text-[8px] font-bold text-slate-400">{s.reps} Reps</span>
+                                 </div>
+                               ))}
+                             </div>
+                           </div>
+                         ))}
+                       </div>
+                     )}
+                   </div>
+                 ))}
+               </div>
+             )}
           </div>
         </div>
       )}

@@ -42,8 +42,10 @@ interface AggregatedIngredient {
 const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan, onUpdateWeeklyPlan, isLoading, language, profile, targets, onUpdateProfile }) => {
   const [selectedDay, setSelectedDay] = useState<string>(DAYS_DE[0]);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [activeTab, setActiveTab] = useState<'engine' | 'recipes'>('engine');
   const [showConfig, setShowConfig] = useState(false);
   const [showShoppingList, setShowShoppingList] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   
   const [preferredTags, setPreferredTags] = useState<string[]>(profile?.nutritionPreferences?.preferredIngredients || []);
   const [excludedTags, setExcludedTags] = useState<string[]>(profile?.nutritionPreferences?.excludedIngredients || []);
@@ -76,10 +78,12 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
   // Fix: Added missing 'instructions' property to the translation object 't'
   const t = language === 'de' ? {
     engine: 'Food Engine', configSub: 'Algorithmus konfigurieren', daysSelect: 'Tage für den Plan wählen', run: 'Wochenplan erstellen', exception: 'Ausnahme loggen', appliances: 'Geräte', protein: 'Protein', carbs: 'Carbs', fats: 'Fette', ingredients: 'Zutaten', instructions: 'Zubereitung', shopping: 'Einkaufsliste', noPlan: 'Kein Plan vorhanden', preferred: 'Bevorzugte Zutaten', excluded: 'Ausschlüsse (Allergien/Abneigungen)', add: 'Hinzufügen', export: 'In Kalender exportieren', varietyTitle: 'Wiederholungsmuster', shoppingSub: 'Aggregierte Mengen für die Woche',
-    errorNoAnalysis: 'Bitte führe zuerst eine KI-Analyse im Dashboard (Overview) durch, um deine Kalorienziele zu berechnen.'
+    errorNoAnalysis: 'Bitte führe zuerst eine KI-Analyse im Dashboard (Overview) durch, um deine Kalorienziele zu berechnen.',
+    favorites: 'Rezepte', weeklyPlan: 'Food Engine', planForWeek: 'Für die Woche einplanen', liked: 'Favorit', activeRecipes: 'Eingeplante Rezepte'
   } : {
     engine: 'Food Engine', configSub: 'Configure algorithm', daysSelect: 'Select days', run: 'Generate Weekly Plan', exception: 'Log Exception', appliances: 'Tools', protein: 'Protein', carbs: 'Carbs', fats: 'Fats', ingredients: 'Ingredients', instructions: 'Instructions', shopping: 'Shopping List', noPlan: 'No plan available', preferred: 'Preferred Ingredients', excluded: 'Excluded (Allergies/Dislikes)', add: 'Add', export: 'Export', varietyTitle: 'Repetition Pattern', shoppingSub: 'Weekly aggregated totals',
-    errorNoAnalysis: 'Please perform an AI analysis in the Dashboard (Overview) first to calculate your calorie targets.'
+    errorNoAnalysis: 'Please perform an AI analysis in the Dashboard (Overview) first to calculate your calorie targets.',
+    favorites: 'Recipes', weeklyPlan: 'Food Engine', planForWeek: 'Plan for Week', liked: 'Favorite', activeRecipes: 'Planned Recipes'
   };
 
   const dayTotals = useMemo(() => {
@@ -145,197 +149,367 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
     } 
   };
 
+  const toggleLike = (recipe: Recipe) => {
+    if (!profile) return;
+    const liked = profile.likedRecipes || [];
+    const isLiked = liked.some(r => r.name === recipe.name);
+    let newLiked;
+    if (isLiked) {
+      newLiked = liked.filter(r => r.name !== recipe.name);
+    } else {
+      newLiked = [...liked, { ...recipe, usageCount: recipe.usageCount || 0 }];
+    }
+    onUpdateProfile({ ...profile, likedRecipes: newLiked });
+  };
+
+  const togglePlanned = (recipe: Recipe) => {
+    if (!profile) return;
+    const liked = profile.likedRecipes || [];
+    const newLiked = liked.map(r => 
+      r.name === recipe.name ? { ...r, isPlannedForWeek: !r.isPlannedForWeek } : r
+    );
+    onUpdateProfile({ ...profile, likedRecipes: newLiked });
+  };
+
+  const sortedFavorites = useMemo(() => {
+    let list = [...(profile?.likedRecipes || [])];
+    if (searchTerm) {
+      list = list.filter(r => r.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    }
+    return list.sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0));
+  }, [profile?.likedRecipes, searchTerm]);
+
+  const plannedRecipes = profile?.likedRecipes?.filter(r => r.isPlannedForWeek) || [];
+
   if (isLoading) return <div className="flex flex-col items-center justify-center min-h-[500px]"><div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div><p className="mt-4 font-black uppercase text-[10px] text-slate-400">Masterchef Engine...</p></div>;
 
-  if (!weeklyPlan || showConfig) return (
-    <div className="bg-white rounded-[3rem] shadow-2xl p-8 lg:p-12 border border-slate-100 space-y-10 animate-fade-in mb-10">
-      <div className="flex items-center justify-between">
+  const renderConfig = () => (
+    <div className="bg-white rounded-[3rem] shadow-2xl p-8 lg:p-12 border border-slate-100 space-y-10 animate-fade-in mb-10 overflow-hidden flex flex-col">
+      <div className="flex items-center justify-between shrink-0">
         <div><h3 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">{t.engine}</h3><p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{t.configSub}</p></div>
         {weeklyPlan && <button onClick={() => setShowConfig(false)} className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center"><i className="fas fa-times text-xl"></i></button>}
       </div>
       
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-        <div className="space-y-8">
-          <div className="space-y-4">
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.daysSelect}</label>
-            <div className="flex flex-wrap gap-2">
-              {DAYS_DE.map(day => {
-                const isActive = selectedDays.includes(day);
-                return (
+      <div className="space-y-10 pr-2 custom-scrollbar">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+          <div className="space-y-8">
+            <div className="space-y-4">
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.daysSelect}</label>
+              <div className="flex flex-wrap gap-2">
+                {DAYS_DE.map(day => {
+                  const isActive = selectedDays.includes(day);
+                  return (
+                    <button 
+                      key={day} 
+                      onClick={() => {
+                        const newDays = isActive ? selectedDays.filter(d => d !== day) : [...selectedDays, day];
+                        setSelectedDays(newDays);
+                        updatePrefs({ days: newDays });
+                      }} 
+                      className={`px-4 py-2.5 rounded-xl text-[10px] font-black transition-all border ${isActive ? 'bg-orange-600 border-orange-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-400'}`}
+                    >
+                      {day}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.preferred}</label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input type="text" value={prefInput} onChange={e => setPrefInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddPref()} placeholder="z.B. Skyr, Hähnchen..." className="flex-1 p-4 bg-slate-50 rounded-2xl border border-slate-100 font-bold outline-none focus:ring-2 focus:ring-orange-500" />
+                <button onClick={handleAddPref} className="w-full sm:w-auto px-6 py-4 sm:py-0 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px]">{t.add}</button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {preferredTags.map(tag => (
+                  <span key={tag} className="px-3 py-1.5 bg-orange-50 text-orange-600 border border-orange-100 rounded-xl text-[10px] font-black flex items-center gap-2">
+                    {tag} 
+                    <button onClick={() => {
+                      const newTags = preferredTags.filter(t => t !== tag);
+                      setPreferredTags(newTags);
+                      updatePrefs({ preferredIngredients: newTags });
+                    }}>
+                      <i className="fas fa-times"></i>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.excluded}</label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input type="text" value={exclInput} onChange={e => setExclInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddExcl()} placeholder="z.B. Fisch, Koriander..." className="flex-1 p-4 bg-slate-50 rounded-2xl border border-slate-100 font-bold outline-none focus:ring-2 focus:ring-orange-500" />
+                <button onClick={handleAddExcl} className="w-full sm:w-auto px-6 py-4 sm:py-0 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px]">{t.add}</button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {excludedTags.map(tag => (
+                  <span key={tag} className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-100 rounded-xl text-[10px] font-black flex items-center gap-2">
+                    {tag} 
+                    <button onClick={() => {
+                      const newTags = excludedTags.filter(t => t !== tag);
+                      setExcludedTags(newTags);
+                      updatePrefs({ excludedIngredients: newTags });
+                    }}>
+                      <i className="fas fa-times"></i>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-8">
+            <div className="space-y-4">
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.varietyTitle}</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {VARIETY_OPTIONS.map(opt => (
                   <button 
-                    key={day} 
+                    key={opt.id} 
                     onClick={() => {
-                      const newDays = isActive ? selectedDays.filter(d => d !== day) : [...selectedDays, day];
-                      setSelectedDays(newDays);
-                      updatePrefs({ days: newDays });
+                      const val = opt.id as any;
+                      setPlanVariety(val);
+                      updatePrefs({ planVariety: val });
                     }} 
-                    className={`px-4 py-2.5 rounded-xl text-[10px] font-black transition-all border ${isActive ? 'bg-orange-600 border-orange-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-400'}`}
+                    className={`p-5 rounded-[2rem] border transition-all flex flex-col items-center text-center gap-2 ${planVariety === opt.id ? 'bg-slate-900 border-slate-900 text-white shadow-xl scale-105' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
                   >
-                    {day}
+                    <i className={`fas ${opt.icon} text-lg ${planVariety === opt.id ? 'text-orange-500' : ''}`}></i>
+                    <div>
+                      <p className="text-[10px] font-black uppercase mb-1">{opt[language]}</p>
+                      <p className="text-[8px] opacity-60 font-bold uppercase whitespace-nowrap">{opt.sub}</p>
+                    </div>
                   </button>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="space-y-4">
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.preferred}</label>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input type="text" value={prefInput} onChange={e => setPrefInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddPref()} placeholder="z.B. Skyr, Hähnchen..." className="flex-1 p-4 bg-slate-50 rounded-2xl border border-slate-100 font-bold outline-none focus:ring-2 focus:ring-orange-500" />
-              <button onClick={handleAddPref} className="w-full sm:w-auto px-6 py-4 sm:py-0 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px]">{t.add}</button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {preferredTags.map(tag => (
-                <span key={tag} className="px-3 py-1.5 bg-orange-50 text-orange-600 border border-orange-100 rounded-xl text-[10px] font-black flex items-center gap-2">
-                  {tag} 
-                  <button onClick={() => {
-                    const newTags = preferredTags.filter(t => t !== tag);
-                    setPreferredTags(newTags);
-                    updatePrefs({ preferredIngredients: newTags });
-                  }}>
-                    <i className="fas fa-times"></i>
-                  </button>
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.excluded}</label>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input type="text" value={exclInput} onChange={e => setExclInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddExcl()} placeholder="z.B. Fisch, Koriander..." className="flex-1 p-4 bg-slate-50 rounded-2xl border border-slate-100 font-bold outline-none focus:ring-2 focus:ring-orange-500" />
-              <button onClick={handleAddExcl} className="w-full sm:w-auto px-6 py-4 sm:py-0 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px]">{t.add}</button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {excludedTags.map(tag => (
-                <span key={tag} className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-100 rounded-xl text-[10px] font-black flex items-center gap-2">
-                  {tag} 
-                  <button onClick={() => {
-                    const newTags = excludedTags.filter(t => t !== tag);
-                    setExcludedTags(newTags);
-                    updatePrefs({ excludedIngredients: newTags });
-                  }}>
-                    <i className="fas fa-times"></i>
-                  </button>
-                </span>
-              ))}
+            <div className="space-y-4">
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.appliances}</label>
+              <div className="grid grid-cols-2 gap-3">
+                {APPLIANCES_BASE.map(app => {
+                  const isActive = selectedAppliances.includes(app.id);
+                  return (
+                    <button 
+                      key={app.id} 
+                      onClick={() => {
+                        const newApps = isActive ? selectedAppliances.filter(a => a !== app.id) : [...selectedAppliances, app.id];
+                        setSelectedAppliances(newApps);
+                        updatePrefs({ appliances: newApps });
+                      }} 
+                      className={`flex items-center gap-4 p-4 rounded-2xl border transition-all ${isActive ? 'bg-slate-900 border-slate-900 text-white shadow-md' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
+                    >
+                      <i className={`fas ${app.icon} text-lg ${isActive ? 'text-orange-500' : ''}`}></i>
+                      <span className="text-[10px] font-black uppercase">{app[language]}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="space-y-8">
-          <div className="space-y-4">
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.varietyTitle}</label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {VARIETY_OPTIONS.map(opt => (
-                <button 
-                  key={opt.id} 
-                  onClick={() => {
-                    const val = opt.id as any;
-                    setPlanVariety(val);
-                    updatePrefs({ planVariety: val });
-                  }} 
-                  className={`p-5 rounded-[2rem] border transition-all flex flex-col items-center text-center gap-2 ${planVariety === opt.id ? 'bg-slate-900 border-slate-900 text-white shadow-xl scale-105' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
-                >
-                  <i className={`fas ${opt.icon} text-lg ${planVariety === opt.id ? 'text-orange-500' : ''}`}></i>
-                  <div>
-                    <p className="text-[10px] font-black uppercase mb-1">{opt[language]}</p>
-                    <p className="text-[8px] opacity-60 font-bold uppercase whitespace-nowrap">{opt.sub}</p>
+        <div className="space-y-6 pt-10 border-t border-slate-50">
+          <div className="flex items-center justify-between">
+            <div><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t.activeRecipes}</h4><p className="text-[8px] font-bold text-slate-300 uppercase">Wähle Rezepte im Reiter "Rezepte", um sie fest einzuplanen</p></div>
+            <div className="px-3 py-1.5 bg-slate-50 rounded-xl text-[9px] font-black text-slate-400 uppercase">{plannedRecipes.length} Aktiv</div>
+          </div>
+          
+          {plannedRecipes.length === 0 ? (
+            <div className="p-8 bg-slate-50 rounded-[2rem] border border-dashed border-slate-200 text-center">
+              <i className="fas fa-info-circle text-2xl text-slate-200 mb-2"></i>
+              <p className="text-[9px] font-bold text-slate-400 uppercase">Aktuell keine Rezepte zur Wiederverwendung ausgewählt</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {plannedRecipes.map((fav, i) => (
+                <div key={i} className="p-5 rounded-[2rem] border bg-orange-600 border-orange-600 text-white shadow-lg flex items-center justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-xs truncate mb-1">{fav.name}</p>
+                    <div className="flex items-center gap-2 opacity-60 text-[8px] font-black uppercase">
+                      <span>{fav.usageCount || 0}x Genutzt</span>
+                      <span>•</span>
+                      <span>{fav.prepTime}</span>
+                    </div>
                   </div>
-                </button>
+                  <button onClick={() => togglePlanned(fav)} className="w-10 h-10 rounded-xl bg-white/20 text-white flex items-center justify-center">
+                    <i className="fas fa-times text-xs"></i>
+                  </button>
+                </div>
               ))}
             </div>
-          </div>
-
-          <div className="space-y-4">
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.appliances}</label>
-            <div className="grid grid-cols-2 gap-3">
-              {APPLIANCES_BASE.map(app => {
-                const isActive = selectedAppliances.includes(app.id);
-                return (
-                  <button 
-                    key={app.id} 
-                    onClick={() => {
-                      const newApps = isActive ? selectedAppliances.filter(a => a !== app.id) : [...selectedAppliances, app.id];
-                      setSelectedAppliances(newApps);
-                      updatePrefs({ appliances: newApps });
-                    }} 
-                    className={`flex items-center gap-4 p-4 rounded-2xl border transition-all ${isActive ? 'bg-slate-900 border-slate-900 text-white shadow-md' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
-                  >
-                    <i className={`fas ${app.icon} text-lg ${isActive ? 'text-orange-500' : ''}`}></i>
-                    <span className="text-[10px] font-black uppercase">{app[language]}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
-      <button onClick={handleGenerateClick} className="w-full py-6 bg-orange-600 text-white rounded-[2rem] font-black text-xl uppercase tracking-widest shadow-xl shadow-orange-100 hover:bg-orange-700 transition-all">{t.run}</button>
+      <div className="pt-6 shrink-0">
+        <button onClick={handleGenerateClick} className="w-full py-6 bg-orange-600 text-white rounded-[2rem] font-black text-xl uppercase tracking-widest shadow-xl shadow-orange-100 hover:bg-orange-700 transition-all">{t.run}</button>
+      </div>
     </div>
   );
 
   return (
     <div className="space-y-6 pb-20 animate-fade-in relative">
-      <div className="flex flex-col gap-4">
-        <div className="flex overflow-x-auto gap-1.5 p-1 bg-slate-100 rounded-2xl w-full no-scrollbar">
-          {Object.keys(weeklyPlan || {}).sort((a,b) => DAYS_DE.indexOf(a) - DAYS_DE.indexOf(b)).map(day => (
-            <button key={day} onClick={() => setSelectedDay(day)} className={`shrink-0 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase transition-all whitespace-nowrap ${selectedDay === day ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500'}`}>{day}</button>
-          ))}
-          <div className="flex gap-1.5 ml-auto">
-             <button onClick={() => setShowShoppingList(true)} className="px-4 py-2.5 rounded-xl text-slate-400 bg-white shadow-sm flex items-center justify-center"><i className="fas fa-shopping-basket"></i></button>
-             <button onClick={() => setShowConfig(true)} className="px-4 py-2.5 rounded-xl text-slate-400 bg-white shadow-sm flex items-center justify-center"><i className="fas fa-sliders"></i></button>
+      <div className="flex gap-2 p-1.5 bg-slate-100 rounded-2xl w-fit">
+        <button onClick={() => setActiveTab('engine')} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'engine' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500'}`}>{t.weeklyPlan}</button>
+        <button onClick={() => setActiveTab('recipes')} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'recipes' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500'}`}>{t.favorites}</button>
+      </div>
+
+      {activeTab === 'engine' ? (
+        <div className="space-y-6">
+          {!weeklyPlan || showConfig ? (
+            renderConfig()
+          ) : (
+            <div className="space-y-6">
+              <div className="bg-orange-600 rounded-[2.5rem] p-8 text-white flex justify-between items-center shadow-xl">
+                 <div><h3 className="text-3xl font-black mb-1">{t.engine}</h3><p className="text-orange-100 italic text-sm opacity-80">{plannedRecipes.length} Rezepte manuell eingeplant</p></div>
+                 <button onClick={() => setShowConfig(true)} className="px-6 py-3 bg-white/20 hover:bg-white/30 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-white/30 transition-all"><i className="fas fa-sliders mr-2"></i> {t.engine}</button>
+              </div>
+
+              <div className="flex flex-col gap-4">
+                <div className="flex overflow-x-auto gap-1.5 p-1 bg-slate-100 rounded-2xl w-full no-scrollbar">
+                  {Object.keys(weeklyPlan || {}).sort((a,b) => DAYS_DE.indexOf(a) - DAYS_DE.indexOf(b)).map(day => (
+                    <button key={day} onClick={() => setSelectedDay(day)} className={`shrink-0 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase transition-all whitespace-nowrap ${selectedDay === day ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500'}`}>{day}</button>
+                  ))}
+                  <div className="flex gap-1.5 ml-auto">
+                    <button onClick={() => setShowShoppingList(true)} className="px-4 py-2.5 rounded-xl text-slate-400 bg-white shadow-sm flex items-center justify-center"><i className="fas fa-shopping-basket"></i></button>
+                  </div>
+                </div>
+                
+                {dayTotals && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="bg-white p-3 rounded-2xl text-center shadow-sm"><p className="text-[8px] font-black text-slate-400 uppercase">kcal</p><p className="text-sm font-black text-slate-900">{Math.round(dayTotals.calories)}</p></div>
+                    <div className="bg-white p-3 rounded-2xl text-center shadow-sm"><p className="text-[8px] font-black text-slate-400 uppercase">P</p><p className="text-sm font-black text-slate-900">{Math.round(dayTotals.protein)}g</p></div>
+                    <div className="bg-white p-3 rounded-2xl text-center shadow-sm"><p className="text-[8px] font-black text-slate-400 uppercase">C</p><p className="text-sm font-black text-slate-900">{Math.round(dayTotals.carbs)}g</p></div>
+                    <div className="bg-white p-3 rounded-2xl text-center shadow-sm"><p className="text-[8px] font-black text-slate-400 uppercase">F</p><p className="text-sm font-black text-slate-900">{Math.round(dayTotals.fats)}g</p></div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {MEAL_TYPES.map((type) => {
+                  const meal = weeklyPlan?.[selectedDay]?.[type];
+                  if (!meal) return null;
+                  const isLiked = profile?.likedRecipes?.some(r => r.name === meal.name);
+                  return (
+                    <div key={type} className="bg-white p-5 rounded-[2rem] border border-slate-100 hover:shadow-lg transition-all relative group overflow-hidden cursor-pointer" onClick={() => setSelectedRecipe(meal)}>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); toggleLike(meal); }}
+                        className={`absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 ${isLiked ? 'bg-red-50 text-red-500' : 'bg-slate-50 text-slate-300 hover:text-red-400'}`}
+                      >
+                        <i className={`fa${isLiked ? 's' : 'r'} fa-heart text-xs`}></i>
+                      </button>
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-9 h-9 bg-orange-50 text-orange-500 rounded-xl flex items-center justify-center"><i className={`fas ${type === 'breakfast' ? 'fa-coffee' : type === 'lunch' ? 'fa-sun' : type === 'dinner' ? 'fa-moon' : 'fa-cookie-bite'}`}></i></div>
+                        <div><p className="text-[8px] font-black uppercase text-slate-400 mb-1">{type}</p><h4 className="font-black text-slate-900 text-sm leading-tight h-10 line-clamp-2">{meal.name}</h4></div>
+                      </div>
+                      <div className="flex justify-between text-[9px] font-black text-slate-500 border-t pt-3"><span>{Math.round(meal.calories)} kcal</span><span className="text-orange-600">{Math.round(meal.protein)}g P</span></div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-8 animate-fade-in">
+          <div className="bg-white rounded-[3rem] p-8 lg:p-12 border border-slate-100 shadow-xl">
+             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
+               <div><h3 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">{t.favorites}</h3><p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Deine Bibliothek</p></div>
+               <div className="relative w-full md:w-80">
+                  <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"></i>
+                  <input 
+                    type="text" 
+                    value={searchTerm} 
+                    onChange={e => setSearchTerm(e.target.value)} 
+                    placeholder={language === 'de' ? "Rezepte suchen..." : "Search recipes..."}
+                    className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none focus:ring-2 focus:ring-orange-500 transition-all"
+                  />
+               </div>
+             </div>
+             
+             {profile?.likedRecipes?.length === 0 ? (
+               <div className="h-40 w-full flex flex-col items-center justify-center text-slate-300 gap-4">
+                 <i className="far fa-heart text-4xl opacity-20"></i>
+                 <p className="italic font-medium text-sm">Noch keine Lieblingsrezepte gespeichert.</p>
+               </div>
+             ) : sortedFavorites.length === 0 ? (
+               <div className="h-40 w-full flex flex-col items-center justify-center text-slate-300 gap-4">
+                 <i className="fas fa-search text-4xl opacity-20"></i>
+                 <p className="italic font-medium text-sm">Keine Rezepte für "{searchTerm}" gefunden.</p>
+               </div>
+             ) : (
+               <div className="flex flex-col gap-3">
+                 {sortedFavorites.map((fav, i) => (
+                   <div key={i} className={`bg-white hover:bg-slate-50 p-4 rounded-2xl border transition-all flex items-center gap-4 group cursor-pointer ${fav.isPlannedForWeek ? 'border-orange-200 bg-orange-50/30' : 'border-slate-100'}`} onClick={() => setSelectedRecipe(fav)}>
+                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${fav.isPlannedForWeek ? 'bg-orange-600 text-white' : 'bg-slate-900 text-white'}`}>
+                        <i className="fas fa-utensils"></i>
+                     </div>
+                     
+                     <div className="flex-1 min-w-0">
+                       <h4 className="font-extrabold text-slate-900 text-sm truncate uppercase tracking-tight">{fav.name}</h4>
+                       <div className="flex items-center gap-4 mt-1">
+                         <div className="flex items-center gap-1.5">
+                           <span className="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>
+                           <span className="text-[10px] font-black text-slate-500 uppercase">{Math.round(fav.calories || 0)} kcal</span>
+                         </div>
+                         <div className="flex items-center gap-1.5">
+                           <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                           <span className="text-[10px] font-black text-slate-500 uppercase">{Math.round(fav.protein || 0)}g P</span>
+                         </div>
+                         <div className="flex items-center gap-1.5">
+                           <span className="w-1.5 h-1.5 bg-orange-200 rounded-full"></span>
+                           <span className="text-[10px] font-black text-slate-400 uppercase">{fav.usageCount || 0}x Genutzt</span>
+                         </div>
+                       </div>
+                     </div>
+
+                     <div className="flex items-center gap-2">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); togglePlanned(fav); }} 
+                          className={`h-11 px-4 rounded-xl text-[9px] font-black uppercase transition-all flex items-center gap-2 ${fav.isPlannedForWeek ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                        >
+                          <i className={`fas ${fav.isPlannedForWeek ? 'fa-check' : 'fa-calendar-plus'}`}></i>
+                          <span className="hidden sm:inline">{fav.isPlannedForWeek ? 'Eingeplant' : t.planForWeek}</span>
+                        </button>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); toggleLike(fav); }} 
+                          className="w-11 h-11 rounded-xl bg-white text-red-500 shadow-sm flex items-center justify-center border border-slate-100 hover:bg-red-50 transition-all"
+                        >
+                          <i className="fas fa-heart"></i>
+                        </button>
+                     </div>
+                   </div>
+                 ))}
+               </div>
+             )}
           </div>
         </div>
-        
-        {dayTotals && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-             <div className="bg-white p-3 rounded-2xl text-center shadow-sm"><p className="text-[8px] font-black text-slate-400 uppercase">kcal</p><p className="text-sm font-black text-slate-900">{Math.round(dayTotals.calories)}</p></div>
-             <div className="bg-white p-3 rounded-2xl text-center shadow-sm"><p className="text-[8px] font-black text-slate-400 uppercase">P</p><p className="text-sm font-black text-slate-900">{Math.round(dayTotals.protein)}g</p></div>
-             <div className="bg-white p-3 rounded-2xl text-center shadow-sm"><p className="text-[8px] font-black text-slate-400 uppercase">C</p><p className="text-sm font-black text-slate-900">{Math.round(dayTotals.carbs)}g</p></div>
-             <div className="bg-white p-3 rounded-2xl text-center shadow-sm"><p className="text-[8px] font-black text-slate-400 uppercase">F</p><p className="text-sm font-black text-slate-900">{Math.round(dayTotals.fats)}g</p></div>
-          </div>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {MEAL_TYPES.map((type) => {
-          const meal = weeklyPlan?.[selectedDay]?.[type];
-          if (!meal) return null;
-          return (
-            <div key={type} onClick={() => setSelectedRecipe(meal)} className="bg-white p-5 rounded-[2rem] border border-slate-100 hover:shadow-lg transition-all cursor-pointer group relative overflow-hidden">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-9 h-9 bg-orange-50 text-orange-500 rounded-xl flex items-center justify-center"><i className={`fas ${type === 'breakfast' ? 'fa-coffee' : type === 'lunch' ? 'fa-sun' : type === 'dinner' ? 'fa-moon' : 'fa-cookie-bite'}`}></i></div>
-                <div><p className="text-[8px] font-black uppercase text-slate-400 mb-1">{type}</p><h4 className="font-black text-slate-900 text-sm leading-tight h-10 line-clamp-2">{meal.name}</h4></div>
-              </div>
-              <div className="flex justify-between text-[9px] font-black text-slate-500 border-t pt-3"><span>{Math.round(meal.calories)} kcal</span><span className="text-orange-600">{Math.round(meal.protein)}g P</span></div>
-            </div>
-          );
-        })}
-      </div>
+      )}
 
       {selectedRecipe && (
-        <div className="bg-white rounded-[2.5rem] p-8 lg:p-12 border border-slate-100 shadow-xl animate-fade-in">
-           <div className="flex justify-between items-center border-b pb-6 mb-6">
-             <h3 className="text-2xl font-black">{selectedRecipe.name}</h3>
-             <button onClick={() => setSelectedRecipe(null)} className="w-10 h-10 bg-slate-50 rounded-full text-slate-400 flex items-center justify-center"><i className="fas fa-times"></i></button>
-           </div>
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              <div><h4 className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">{t.ingredients}</h4><ul className="space-y-3">{selectedRecipe.ingredients.map((ing, i) => <li key={i} className="text-xs font-bold text-slate-600 flex gap-3 border-b border-slate-50 pb-2"><span className="w-2 h-2 bg-orange-400 rounded-full mt-1.5 flex-shrink-0"></span>{ing}</li>)}</ul></div>
-              <div><h4 className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">{t.instructions}</h4><div className="space-y-5">{selectedRecipe.instructions.map((step, i) => <div key={i} className="flex gap-4"><div className="flex-shrink-0 w-8 h-8 bg-slate-900 text-white rounded-xl flex items-center justify-center text-[11px] font-black">{i+1}</div><p className="text-xs text-slate-600 leading-relaxed pt-1">{step}</p></div>)}</div></div>
-           </div>
+        <div className="fixed inset-0 z-[250] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 animate-fade-in">
+          <div className="bg-white rounded-[3rem] p-8 lg:p-12 border border-slate-100 shadow-2xl animate-scale-in max-w-4xl w-full max-h-[90vh] overflow-y-auto custom-scrollbar">
+             <div className="flex justify-between items-center border-b pb-6 mb-6">
+               <h3 className="text-2xl font-black uppercase tracking-tight">{selectedRecipe.name}</h3>
+               <button onClick={() => setSelectedRecipe(null)} className="w-10 h-10 bg-slate-50 rounded-full text-slate-400 flex items-center justify-center"><i className="fas fa-times"></i></button>
+             </div>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                <div><h4 className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">{t.ingredients}</h4><ul className="space-y-3">{selectedRecipe.ingredients.map((ing, i) => <li key={i} className="text-xs font-bold text-slate-600 flex gap-3 border-b border-slate-50 pb-2"><span className="w-2 h-2 bg-orange-400 rounded-full mt-1.5 flex-shrink-0"></span>{ing}</li>)}</ul></div>
+                <div><h4 className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">{t.instructions}</h4><div className="space-y-5">{selectedRecipe.instructions.map((step, i) => <div key={i} className="flex gap-4"><div className="flex-shrink-0 w-8 h-8 bg-slate-900 text-white rounded-xl flex items-center justify-center text-[11px] font-black">{i+1}</div><p className="text-xs text-slate-600 leading-relaxed pt-1">{step}</p></div>)}</div></div>
+             </div>
+          </div>
         </div>
       )}
 
       {showShoppingList && (
-        <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 animate-fade-in">
+        <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 animate-fade-in">
           <div className="bg-white rounded-[3rem] w-full max-w-4xl max-h-[90vh] shadow-2xl overflow-hidden flex flex-col animate-scale-in">
             <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
               <div><h3 className="text-2xl font-black uppercase tracking-tight flex items-center gap-3"><i className="fas fa-basket-shopping text-amber-400"></i> {t.shopping}</h3><p className="text-slate-400 text-[10px] font-bold uppercase mt-1">{t.shoppingSub}</p></div>
               <button onClick={() => setShowShoppingList(false)} className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center"><i className="fas fa-times"></i></button>
             </div>
-            <div className="flex-grow overflow-y-auto p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="flex-grow overflow-y-auto p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 no-scrollbar">
               {shoppingList.map((ing, i) => (
                 <label key={i} className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100 cursor-pointer active:bg-slate-200 transition-all">
                   <input type="checkbox" className="w-6 h-6 rounded-lg accent-orange-500" />
@@ -349,4 +523,5 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
     </div>
   );
 };
+
 export default NutritionTab;

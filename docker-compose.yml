@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  heliofit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: heliofit-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - PORT=8000
+      - DATABASE_URL=postgres://heliofit:heliofit_pw@db:5432/heliofit_db
+    env_file:
+      - .env
+    depends_on:
+      - db
+    command: npm run dev
+
+  db:
+    image: postgres:15-alpine
+    container_name: heliofit-db
+    environment:
+      POSTGRES_USER: heliofit
+      POSTGRES_PASSWORD: heliofit_pw
+      POSTGRES_DB: heliofit_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

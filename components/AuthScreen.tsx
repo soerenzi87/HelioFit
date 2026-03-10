@@ -5,11 +5,12 @@ import { Language } from '../types';
 interface AuthScreenProps {
   onLogin: (username: string, password: string) => boolean;
   onRegister: () => void;
+  onMockLogin: () => void;
   language: Language;
   existingUsers: string[];
 }
 
-const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, onRegister, language, existingUsers }) => {
+const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, onRegister, onMockLogin, language, existingUsers }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -21,6 +22,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, onRegister, language, 
     password: 'Profil-Passwort',
     loginBtn: 'Profil öffnen',
     registerBtn: 'Neuen Nutzer anlegen',
+    mockBtn: 'Demo Modus (Mock-Daten)',
     error: 'Ungültiges Passwort für dieses Profil',
     selectUser: 'Gespeicherte Profile',
     noAccount: 'Weiterer Nutzer benötigt?',
@@ -35,6 +37,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, onRegister, language, 
     password: 'Profile Password',
     loginBtn: 'Open Profile',
     registerBtn: 'Create New User',
+    mockBtn: 'Demo Mode (Mock Data)',
     error: 'Invalid password for this profile',
     selectUser: 'Saved Profiles',
     noAccount: 'Need another user?',
@@ -124,6 +127,9 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, onRegister, language, 
               <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-4">{t.noAccount}</p>
               <button onClick={onRegister} className="w-full py-4 bg-orange-50 text-orange-600 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-orange-100 transition-all flex items-center justify-center gap-2">
                 <i className="fas fa-user-plus"></i> {t.registerBtn}
+              </button>
+              <button onClick={onMockLogin} className="w-full py-4 bg-indigo-50 text-indigo-600 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-indigo-100 transition-all flex items-center justify-center gap-2 border border-indigo-100">
+                <i className="fas fa-flask"></i> {t.mockBtn}
               </button>
             </div>
           </div>
