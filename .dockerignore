@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+.env
+.env.*
+*.md
+Old_Server
+.claude
+.vscode
+*.log
+deploy.py
+heliofit-image.tar.gz
+firebase-sa.json

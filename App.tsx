@@ -6,23 +6,22 @@ import NutritionTab from './components/NutritionTab';
 import WorkoutTab from './components/WorkoutTab';
 import HealthTab from './components/HealthTab';
 import SettingsTab from './components/SettingsTab';
-import AuthScreen from './components/AuthScreen';
 import UserProfileForm from './components/UserProfileForm';
-import SuperUserAuth from './components/SuperUserAuth';
+import AuthPortal from './components/AuthPortal';
+import AdminPanel from './components/AdminPanel';
 import { analyzeHealthData, generateMealPlan, generateWorkoutPlan, analyzeOverallProgress, analyzeHealthTrends, setMockMode } from './services/geminiService';
 import { initGoogleFitAuth, requestGoogleFitAccess, fetchGoogleFitData, revokeGoogleFitAccess } from './services/googleFitService';
 import { getWithingsAuthUrl, fetchWithingsData } from './services/withingsService';
 import { loginHealthBridge, fetchHealthBridgeData } from './services/healthBridgeService';
 
-type TabType = 'overview' | 'health' | 'nutrition' | 'workout' | 'settings';
+type TabType = 'overview' | 'health' | 'nutrition' | 'workout' | 'settings' | 'admin';
 type AuthView = 'login' | 'register';
 
 const TRANSLATIONS = {
   de: {
     heroTitle: 'HelioFit ',
     heroSpan: 'AI',
-    logout: 'Profil verlassen',
-    lockSystem: 'System sperren',
+    logout: 'Abmelden',
     analyzing: 'Helio-Engine analysiert Daten...',
     errorQuota: 'API-Limit erreicht. Bitte versuchen Sie es in wenigen Minuten erneut.',
     errorGeneral: 'Ein Fehler ist aufgetreten. Bitte versuchen Sie es erneut.',
@@ -34,8 +33,7 @@ const TRANSLATIONS = {
   en: {
     heroTitle: 'HelioFit ',
     heroSpan: 'AI',
-    logout: 'Exit Profile',
-    lockSystem: 'Lock System',
+    logout: 'Logout',
     analyzing: 'Helio-Engine analyzing data...',
     errorQuota: 'API limit reached. Please try again in a few minutes.',
     errorGeneral: 'An error occurred. Please try again.',
@@ -46,7 +44,6 @@ const TRANSLATIONS = {
   }
 };
 
-const MASTER_PASSWORD = "didwuj-tesvoG-govho8";
 const MOCK_DB: Record<string, any> = {};
 
 const SplashScreen: React.FC<{ language: Language; onFinished: () => void }> = ({ language, onFinished }) => {
@@ -60,15 +57,15 @@ const SplashScreen: React.FC<{ language: Language; onFinished: () => void }> = (
     return () => clearTimeout(timer);
   }, [onFinished]);
   return (
-    <div className={`fixed inset-0 z-[999] bg-white flex flex-col items-center justify-center transition-opacity duration-1000 ${isExiting ? 'animate-splash-exit' : ''}`}>
+    <div className={`fixed inset-0 z-[999] bg-[#0f172a] flex flex-col items-center justify-center transition-opacity duration-1000 ${isExiting ? 'animate-splash-exit' : ''}`}>
       <div className="flex flex-col items-center space-y-6">
-        <div className="w-24 h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center text-white text-5xl font-black italic shadow-2xl animate-splash">H</div>
+        <div className="w-24 h-24 bg-indigo-600 rounded-[2rem] flex items-center justify-center text-white text-5xl font-black italic shadow-2xl animate-splash">H</div>
         <div className="text-center px-6">
-          <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tighter uppercase animate-fade-in-up" style={{ animationDelay: '0.4s' }}>{t.heroTitle}<span className="text-orange-600 italic">{t.heroSpan}</span></h1>
+          <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tighter uppercase animate-fade-in-up" style={{ animationDelay: '0.4s' }}>{t.heroTitle}<span className="text-orange-600 italic">{t.heroSpan}</span></h1>
           <p className="text-slate-400 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] mt-3 animate-fade-in-up" style={{ animationDelay: '0.8s' }}>{t.tagline}</p>
         </div>
       </div>
-      <div className="mt-12 animate-fade-in-up" style={{ animationDelay: '1.2s' }}><p className="text-[9px] font-medium tracking-[0.15em] text-slate-300">{t.createdBy}</p></div>
+      <div className="mt-12 animate-fade-in-up" style={{ animationDelay: '1.2s' }}><p className="text-[9px] font-medium tracking-[0.15em] text-slate-500">{t.createdBy}</p></div>
     </div>
   );
 };
@@ -76,6 +73,8 @@ const SplashScreen: React.FC<{ language: Language; onFinished: () => void }> = (
 const App: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true);
   const [isSuperLoggedIn, setIsSuperLoggedIn] = useState(() => sessionStorage.getItem('heliofit_super_auth') === 'true');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isApprovalPending, setIsApprovalPending] = useState(false);
   const [language, setLanguage] = useState<Language>(() => (localStorage.getItem('heliofit_lang') as Language) || 'de');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
@@ -91,6 +90,8 @@ const App: React.FC = () => {
   const [isSyncingHealth, setIsSyncingHealth] = useState(false);
   const [isSyncingWithings, setIsSyncingWithings] = useState(false);
   const [isSyncingHealthBridge, setIsSyncingHealthBridge] = useState(false);
+  const [isPushSyncingScale, setIsPushSyncingScale] = useState(false);
+  const [isPushSyncingZepp, setIsPushSyncingZepp] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(() => sessionStorage.getItem('google_fit_token'));
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -102,33 +103,82 @@ const App: React.FC = () => {
   // Load DB from server or localStorage
   useEffect(() => {
     const loadDb = async () => {
+      let finalDb: Record<string, any> = {};
+
+      // 1. Try server
       try {
         const response = await fetch('/api/db');
         if (response.ok) {
           const serverDb = await response.json();
           if (serverDb && Object.keys(serverDb).length > 0) {
-            setDb(serverDb);
-            setIsDbLoaded(true);
-            return;
+            finalDb = serverDb;
           }
         }
       } catch (e) {
         console.error("Failed to fetch DB from server", e);
       }
 
+      // 2. Try localStorage (and merge)
       const saved = localStorage.getItem('heliofit_manual_db_v1');
       if (saved) {
         try {
-          setDb(JSON.parse(saved));
+          const localDb = JSON.parse(saved);
+          finalDb = { ...finalDb, ...localDb };
         } catch (e) {
           console.error("Failed to parse local DB", e);
         }
       }
+
+      // 3. Migration: Ensure all entries have the { profile, logs, health } structure
+      const migratedDb: Record<string, any> = {};
+      Object.entries(finalDb).forEach(([key, val]: [string, any]) => {
+        if (val && !val.profile) {
+          // Old format: val IS the profile
+          migratedDb[key] = { profile: val, logs: [], health: null };
+        } else {
+          migratedDb[key] = val;
+        }
+      });
+
+      // 4. Seed initial admin if MISSING
+      const initialAdminEmail = 'admin@heliofit.ai';
+      if (!migratedDb[initialAdminEmail]) {
+        const initialAdmin: UserProfile = {
+          name: 'Admin',
+          email: initialAdminEmail,
+          password: 'admin123',
+          isApproved: true,
+          isAdmin: true,
+          age: 30, weight: 75, height: 180, gender: 'male',
+          goals: [], activityLevel: ActivityLevel.MODERATE
+        };
+        migratedDb[initialAdminEmail] = { profile: initialAdmin, logs: [], health: null };
+      }
+
+      setDb(migratedDb);
       setIsDbLoaded(true);
     };
 
     loadDb();
   }, []);
+
+  // Restore profile on refresh
+  useEffect(() => {
+    if (isDbLoaded && isSuperLoggedIn && !profile) {
+      const savedEmail = sessionStorage.getItem('heliofit_user_email');
+      if (savedEmail) {
+        const userData = db[savedEmail];
+        if (userData) {
+          setProfile(userData.profile);
+          setWorkoutLogs(userData.logs || []);
+          setHealthData(userData.health || null);
+          setAnalysis(userData.analysis || null);
+          setProgressAnalysis(userData.progressAnalysis || null);
+          if (userData.profile.isAdmin) setActiveTab('admin');
+        }
+      }
+    }
+  }, [isDbLoaded, isSuperLoggedIn, profile, db]);
 
   // Save DB to server and localStorage
   useEffect(() => {
@@ -394,9 +444,10 @@ const App: React.FC = () => {
         }
       });
       
-      const mergedData: HealthData = { 
-        ...healthData, 
+      const mergedData: HealthData = {
+        ...healthData,
         metrics: mergedMetrics.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+        readings: data.readings,
         sources: { ...(healthData?.sources || {}), healthBridge: true }
       };
       
@@ -452,6 +503,44 @@ const App: React.FC = () => {
     handleSyncHealthBridge(updatedProfile);
   };
 
+  const handlePushSync = async (appType: 'scale_bridge' | 'zepp_bridge', mode?: 'history') => {
+    if (!profile?.healthBridgeConfig) return;
+    const syncToken = profile.healthBridgeConfig.apiKey;
+    const baseUrl = profile.healthBridgeConfig.baseUrl?.replace(/\/+$/, '') || '';
+    if (!syncToken || !baseUrl) {
+      alert('HealthBridge ist nicht konfiguriert. Bitte zuerst Sync Token und Base URL setzen.');
+      return;
+    }
+
+    const setLoading = appType === 'scale_bridge' ? setIsPushSyncingScale : setIsPushSyncingZepp;
+    setLoading(true);
+    try {
+      const url = `${baseUrl}/hb/ingest/${syncToken}/push-sync`;
+      const body: Record<string, string> = { app_type: appType };
+      if (mode) body.mode = mode;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.detail || `HTTP ${resp.status}`);
+
+      const label = appType === 'scale_bridge' ? 'ScaleBridge' : 'ZeppBridge';
+      if (result.status === 'ok') {
+        alert(`${label}: Neue Daten empfangen nach ${result.waited_seconds}s – lade Historie...`);
+        await handleSyncHealthBridge();
+      } else {
+        alert(`${label}: Timeout – keine neuen Daten innerhalb von ${result.waited_seconds}s`);
+      }
+    } catch (e: any) {
+      console.error(`Push-sync [${appType}] error:`, e);
+      alert(e.message || 'Push-Sync fehlgeschlagen');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRegister = (newProfile: UserProfile) => {
     const p: UserProfile = { 
       ...newProfile, 
@@ -497,214 +586,301 @@ const App: React.FC = () => {
   return (
     <>
       {showSplash && <SplashScreen language={language} onFinished={() => setShowSplash(false)} />}
-      {!showSplash && !isSuperLoggedIn && <SuperUserAuth language={language} onUnlock={(p) => { 
-        if(p === MASTER_PASSWORD) { 
-          setIsSuperLoggedIn(true); 
-          sessionStorage.setItem('heliofit_super_auth', 'true');
-          return true; 
-        } 
-        return false; 
-      }} />}
-      <div className={`min-h-screen pt-16 pb-10 px-0 transition-opacity duration-700 ${(!showSplash && isSuperLoggedIn) ? 'opacity-100' : 'opacity-0'} flex flex-col`}>
-        <header className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-100 safe-top">
+      {!showSplash && !isSuperLoggedIn && !isRegistering && (
+        <AuthPortal 
+          language={language} 
+          isApprovalPending={isApprovalPending}
+          onLogin={(user) => { 
+            console.log("Auth attempt:", user);
+            
+            // Check if user exists in DB
+            const existingUser = db[user.email] || db[user.name];
+            
+            if (existingUser) {
+              // If Email Login, verify password
+              if (!user.isGoogle && existingUser.profile.password !== user.password) {
+                alert(language === 'de' ? "Falsches Passwort" : "Invalid Password");
+                return;
+              }
+              
+              // Check for approval
+              if (existingUser.profile.isApproved === false) {
+                setIsApprovalPending(true);
+                return;
+              }
+              
+              setProfile(existingUser.profile);
+              if (existingUser.profile.isAdmin) setActiveTab('admin');
+              setWorkoutLogs(existingUser.logs || []);
+              setHealthData(existingUser.health || null);
+              setAnalysis(existingUser.analysis || null);
+              const pa = Array.isArray(existingUser.progressAnalysis) ? existingUser.progressAnalysis : null;
+              setProgressAnalysis(pa);
+              setWeeklyPlan(existingUser.weeklyPlan || null);
+              setWorkoutPlan(existingUser.workoutPlan || null);
+              setHealthInsights(existingUser.healthInsights || []);
+              
+              setIsSuperLoggedIn(true); 
+              sessionStorage.setItem('heliofit_super_auth', 'true');
+              sessionStorage.setItem('heliofit_user_email', user.email);
+            } else {
+              // User doesn't exist
+              if (user.isGoogle) {
+                // For Google, we can auto-init a pending profile
+                const newProfile: UserProfile = {
+                  name: user.email,
+                  age: 30, weight: 75, height: 180, gender: 'male',
+                  goals: [], activityLevel: ActivityLevel.MODERATE,
+                  isApproved: false
+                };
+                setDb(prev => ({ ...prev, [user.email]: { profile: newProfile, logs: [], health: null } }));
+                setIsApprovalPending(true);
+                return;
+              } else {
+                // For Email, if user doesn't exist, it's an error
+                alert(language === 'de' ? "Benutzer nicht gefunden" : "User not found");
+                return;
+              }
+            }
+          }} 
+          onRegister={() => {
+            setIsRegistering(true);
+          }}
+        />
+      )}
+
+      {!showSplash && !isSuperLoggedIn && isRegistering && (
+        <div className="fixed inset-0 z-[1000] bg-[#0f172a] overflow-y-auto">
+          <UserProfileForm 
+            onSubmit={(p) => {
+              const newProfile = { ...p, isApproved: false };
+              handleRegister(newProfile);
+              setIsRegistering(false);
+              setIsApprovalPending(true);
+            }} 
+            onCancel={() => setIsRegistering(false)} 
+            language={language} 
+          />
+        </div>
+      )}
+      <div className={`min-h-screen pt-16 pb-10 px-0 transition-opacity duration-700 ${(!showSplash && isSuperLoggedIn) ? 'opacity-100' : 'opacity-0'} flex flex-col bg-[#0f172a]`}>
+        <header className="fixed top-0 left-0 right-0 z-50 bg-[#0f172a]/80 backdrop-blur-md border-b border-white/5 safe-top">
           <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => setActiveTab('overview')}>
-              <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white font-black italic shadow-lg text-sm">H</div>
-              <span className="hidden xs:inline font-black text-lg tracking-tighter text-slate-800 uppercase">{t.heroTitle}<span className="text-orange-600 italic">{t.heroSpan}</span></span>
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-black italic shadow-lg text-sm">H</div>
+              <span className="hidden xs:inline font-black text-lg tracking-tighter text-white uppercase">{t.heroTitle}<span className="text-orange-600 italic">{t.heroSpan}</span></span>
             </div>
             <nav className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
-              {['overview', 'health', 'nutrition', 'workout', 'settings'].map((tab: any) => (
+              {!profile?.isAdmin && ['overview', 'health', 'nutrition', 'workout', 'settings'].map((tab: any) => (
                 <button 
-                  key={tab} 
-                  onClick={() => setActiveTab(tab as TabType)} 
-                  className={`shrink-0 px-3.5 py-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
-                >
-                  {tab === 'settings' ? (language === 'de' ? 'Setup' : 'Setup') : tab}
-                </button>
+                   key={tab} 
+                   onClick={() => setActiveTab(tab as TabType)} 
+                   className={`shrink-0 px-3.5 py-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                 >
+                   {tab === 'settings' ? (language === 'de' ? 'Setup' : 'Setup') : tab}
+                 </button>
               ))}
+              {profile?.isAdmin && (
+                <button 
+                  onClick={() => setActiveTab('admin')} 
+                  className={`shrink-0 px-3.5 py-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'admin' ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20' : 'text-orange-500/60 hover:text-orange-500 hover:bg-white/5'}`}
+                >
+                  {language === 'de' ? 'Benutzerverwaltung' : 'User Management'}
+                </button>
+              )}
             </nav>
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => {
                   sessionStorage.removeItem('heliofit_super_auth');
-                  window.location.reload();
+                  sessionStorage.removeItem('heliofit_user_email');
+                  setIsSuperLoggedIn(false);
+                  setProfile(null);
                 }} 
-                className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest text-red-500 hover:bg-red-50 transition-all"
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest text-red-400 hover:bg-red-400/10 transition-all font-sans"
               >
-                <i className="fas fa-lock"></i> {t.lockSystem}
+                <i className="fas fa-right-from-bracket"></i> {t.logout}
               </button>
-              <button onClick={() => setLanguage(language === 'de' ? 'en' : 'de')} className="w-8 h-8 flex items-center justify-center text-[9px] font-black uppercase text-slate-500 bg-white rounded-lg border border-slate-200">{language}</button>
+              <button onClick={() => setLanguage(language === 'de' ? 'en' : 'de')} className="w-8 h-8 flex items-center justify-center text-[9px] font-black uppercase text-slate-400 bg-white/5 rounded-lg border border-white/10">{language}</button>
             </div>
           </div>
         </header>
         <main className="max-w-7xl mx-auto flex-grow w-full px-4 sm:px-6 lg:px-8 pt-4">
-          {!profile ? (
-            authView === 'login' ? <AuthScreen onLogin={(u, p) => { 
-              const d = db[u]; 
-              if (d && d.profile.password === p) { 
-                setProfile(d.profile); 
-                setWorkoutLogs(d.logs || []); 
-                setHealthData(d.health || null); 
-                setAnalysis(d.analysis || null); 
-                const pa = Array.isArray(d.progressAnalysis) ? d.progressAnalysis : null;
-                setProgressAnalysis(pa); 
-                setWeeklyPlan(d.weeklyPlan || null); 
-                setWorkoutPlan(d.workoutPlan || null); 
-                setHealthInsights(d.healthInsights || []); 
-                setMockMode(false); // Real users get live mode unless env overrides
-                return true; 
-              } 
-              return false; 
-            }} 
-            onMockLogin={() => {
-              const mockProfile: UserProfile = {
-                name: 'MockUser',
-                age: 30,
-                weight: 80,
-                height: 180,
-                gender: 'male',
-                goals: [FitnessGoal.MUSCLE_GAIN],
-                activityLevel: ActivityLevel.ACTIVE,
-                likedRecipes: [
-                  { name: "Skyr mit Beeren & Nüssen", ingredients: ["250 g Skyr", "100 g Beeren", "30 g Mandeln"], instructions: ["Skyr in Schale geben", "Beeren waschen", "Nüsse hacken und drüberstreuen"], calories: 350, protein: 30, carbs: 20, fats: 15, prepTime: "5m", requiredAppliances: [], usageCount: 5 },
-                  { name: "Lachs-Curry mit Reis", ingredients: ["150 g Lachs", "100 g Basmatireis", "200 g Brokkoli", "50 ml Kokosmilch"], instructions: ["Reis kochen", "Lachs würfeln und anbraten", "Brokkoli und Kokosmilch zugeben"], calories: 650, protein: 35, carbs: 55, fats: 25, prepTime: "20m", requiredAppliances: ["Herd", "Pfanne"], usageCount: 3 }
-                ]
-              };
-              setProfile(mockProfile);
-              setMockMode(true); // Mock user strictly uses mock Gemini
-            }}
-            onRegister={() => setAuthView('register')} 
-            language={language} 
-            existingUsers={Object.keys(db)} 
-          /> : <UserProfileForm onSubmit={handleRegister} onCancel={() => setAuthView('login')} language={language} />
-          ) : (
+          {profile ? (
             <div className="space-y-6 animate-fade-in">
-              {activeTab === 'overview' && (
-                <Dashboard 
-                  analysis={analysis} 
-                  progressAnalysis={progressAnalysis}
-                  profile={profile} 
-                  healthData={healthData} 
+              {profile.isAdmin ? (
+                <AdminPanel 
+                  users={db} 
                   language={language} 
-                  onRefresh={async () => { 
-                    setIsAnalyzing(true); 
-                    try { 
-                      const r = await analyzeHealthData(profile, healthData, language); 
-                      setAnalysis(r); 
-                      setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], analysis: r}})); 
-                    } catch(e) {} finally { setIsAnalyzing(false); } 
-                  }} 
-                  onAnalyzeProgress={async () => {
-                    setIsAnalyzing(true);
-                    try {
-                      const r = await analyzeOverallProgress(profile, healthData, workoutLogs, language);
-                      setProgressAnalysis(r);
-                      setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], progressAnalysis: r}}));
-                    } catch(e) {} finally { setIsAnalyzing(false); }
-                  }}
-                  onUpdateProfile={(up) => { 
-                    setProfile(up); 
-                    setDb(prev => ({...prev, [up.name]: {...prev[up.name], profile: up}})); 
-                  }} 
-                  onResetSync={handleResetGoogle}
-                  isAnalyzing={isAnalyzing} 
-                />
-              )}
-              {activeTab === 'health' && (
-                <HealthTab 
-                  profile={profile} 
-                  healthData={healthData} 
-                  insights={healthInsights} 
-                  onUpdateInsights={handleUpdateHealthInsights} 
-                  onResetSync={handleResetGoogle} 
-                  onUploadData={(d) => { 
-                    setHealthData(d); 
-                    setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], health: d}})); 
-                  }} 
-                  isLoading={isSyncingHealth || isSyncingWithings || isSyncingHealthBridge} 
-                  language={language} 
-                />
-              )}
-              {activeTab === 'settings' && (
-                <SettingsTab
-                  profile={profile}
-                  healthData={healthData}
-                  onSync={handleSyncHealth}
-                  onResetSync={handleResetGoogle}
-                  onSyncWithings={handleSyncWithings}
-                  onResetWithings={handleResetWithings}
-                  onUpdateWithingsConfig={handleUpdateWithingsConfig}
-                  onSyncHealthBridge={handleSyncHealthBridge}
-                  onResetHealthBridge={handleResetHealthBridge}
-                  onUpdateHealthBridgeConfig={handleUpdateHealthBridgeConfig}
-                  onUploadData={(d) => { 
-                    setHealthData(d); 
-                    setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], health: d}})); 
-                  }}
-                  isLoading={isSyncingHealth || isSyncingWithings || isSyncingHealthBridge}
-                  language={language}
-                />
-              )}
-              {activeTab === 'nutrition' && (
-                <NutritionTab 
-                  weeklyPlan={weeklyPlan} 
-                  onGeneratePlan={async (pfs) => { 
-                    setIsGeneratingPlan(true); 
-                    try { 
-                      const pl = await generateMealPlan(profile, analysis!.targets, pfs, language); 
-                      setWeeklyPlan(pl); 
-                      
-                      // Increment usageCount for recipes used in the plan
-                      if (profile && profile.likedRecipes) {
-                        const usedRecipeNames = new Set<string>();
-                        Object.values(pl).forEach(day => {
-                          Object.values(day).forEach(meal => {
-                            if (meal && (meal as Recipe).name) {
-                              usedRecipeNames.add((meal as Recipe).name);
-                            }
-                          });
-                        });
-
-                        const updatedLikedRecipes = profile.likedRecipes.map(r => {
-                          if (usedRecipeNames.has(r.name)) {
-                            return { ...r, usageCount: (r.usageCount || 0) + 1 };
-                          }
-                          return r;
-                        });
-
-                        const updatedProfile = { ...profile, likedRecipes: updatedLikedRecipes };
+                  onUpdateUser={(email, updates) => {
+                    setDb(prev => {
+                      const user = prev[email];
+                      if (!user) return prev;
+                      const updatedProfile = { ...user.profile, ...updates };
+                      if (profile && (profile.email === email || profile.name === email)) {
                         setProfile(updatedProfile);
-                        setDb(prev => ({
-                          ...prev, 
-                          [profile.name]: {
-                            ...prev[profile.name], 
-                            weeklyPlan: pl,
-                            profile: updatedProfile
-                          }
-                        }));
-                      } else {
-                        setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], weeklyPlan: pl}}));
                       }
-                    } catch(e){
-                      console.error("Failed to generate plan", e);
-                    } finally {
-                      setIsGeneratingPlan(false); 
-                    } 
-                  }} 
-                  onUpdateWeeklyPlan={(d, pl) => setWeeklyPlan(prev => ({...prev, [d]: pl}))} 
-                  isLoading={isGeneratingPlan} 
-                  language={language} 
-                  profile={profile} 
-                  targets={analysis?.targets} 
-                  onUpdateProfile={(up) => { 
-                    setProfile(up); 
-                    setDb(prev => ({...prev, [up.name]: {...prev[up.name], profile: up}})); 
-                  }} 
+                      return { ...prev, [email]: { ...user, profile: updatedProfile } };
+                    });
+                  }}
+                  onRenameUser={(oldEmail, newEmail) => {
+                    setDb(prev => {
+                      if (!prev[oldEmail] || prev[newEmail]) return prev;
+                      const newDb = { ...prev };
+                      const data = newDb[oldEmail];
+                      delete newDb[oldEmail];
+                      newDb[newEmail] = {
+                        ...data,
+                        profile: { ...data.profile, email: newEmail, name: data.profile.name === oldEmail ? newEmail : data.profile.name }
+                      };
+                      return newDb;
+                    });
+                  }}
+                  onDeleteUser={(email) => {
+                    setDb(prev => {
+                      const newDb = { ...prev };
+                      delete newDb[email];
+                      return newDb;
+                    });
+                  }}
                 />
+              ) : (
+                <>
+                  {activeTab === 'overview' && (
+                    <Dashboard 
+                      analysis={analysis} 
+                      progressAnalysis={progressAnalysis}
+                      profile={profile} 
+                      healthData={healthData} 
+                      language={language} 
+                      onRefresh={async () => { 
+                        setIsAnalyzing(true); 
+                        try { 
+                          const r = await analyzeHealthData(profile, healthData, language); 
+                          setAnalysis(r); 
+                          setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], analysis: r}})); 
+                        } catch(e) {} finally { setIsAnalyzing(false); } 
+                      }} 
+                      onAnalyzeProgress={async () => {
+                        setIsAnalyzing(true);
+                        try {
+                          const r = await analyzeOverallProgress(profile, healthData, workoutLogs, language);
+                          setProgressAnalysis(r);
+                          setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], progressAnalysis: r}}));
+                        } catch(e) {} finally { setIsAnalyzing(false); }
+                      }}
+                      onUpdateProfile={(up) => { 
+                        setProfile(up); 
+                        setDb(prev => ({...prev, [up.name]: {...prev[up.name], profile: up}})); 
+                      }} 
+                      onResetSync={handleResetGoogle}
+                      isAnalyzing={isAnalyzing} 
+                    />
+                  )}
+                  {activeTab === 'health' && (
+                    <HealthTab 
+                      profile={profile} 
+                      healthData={healthData} 
+                      insights={healthInsights} 
+                      onUpdateInsights={handleUpdateHealthInsights} 
+                      onResetSync={handleResetGoogle} 
+                      onUploadData={(d) => { 
+                        setHealthData(d); 
+                        setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], health: d}})); 
+                      }} 
+                      isLoading={isSyncingHealth || isSyncingWithings || isSyncingHealthBridge} 
+                      language={language} 
+                    />
+                  )}
+                  {activeTab === 'settings' && (
+                    <SettingsTab
+                      profile={profile}
+                      healthData={healthData}
+                      onSync={handleSyncHealth}
+                      onResetSync={handleResetGoogle}
+                      onSyncWithings={handleSyncWithings}
+                      onResetWithings={handleResetWithings}
+                      onUpdateWithingsConfig={handleUpdateWithingsConfig}
+                      onSyncHealthBridge={handleSyncHealthBridge}
+                      onResetHealthBridge={handleResetHealthBridge}
+                      onUpdateHealthBridgeConfig={handleUpdateHealthBridgeConfig}
+                      onPushSync={handlePushSync}
+                      isPushSyncingScale={isPushSyncingScale}
+                      isPushSyncingZepp={isPushSyncingZepp}
+                      onUploadData={(d) => {
+                        setHealthData(d);
+                        setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], health: d}}));
+                      }}
+                      onUpdateProfile={(up) => {
+                        setProfile(up);
+                        setDb(prev => ({...prev, [up.name]: {...prev[up.name], profile: up}}));
+                      }}
+                      isLoading={isSyncingHealth || isSyncingWithings || isSyncingHealthBridge}
+                      language={language}
+                    />
+                  )}
+                  {activeTab === 'nutrition' && (
+                    <NutritionTab 
+                      weeklyPlan={weeklyPlan} 
+                      onGeneratePlan={async (pfs) => { 
+                        setIsGeneratingPlan(true); 
+                        try { 
+                          const pl = await generateMealPlan(profile, analysis?.targets, pfs, language); 
+                          setWeeklyPlan(pl); 
+                          
+                          // Increment usageCount for recipes used in the plan
+                          if (profile && profile.likedRecipes) {
+                            const usedRecipeNames = new Set<string>();
+                            Object.values(pl).forEach(day => {
+                              Object.values(day).forEach(meal => {
+                                if (meal && (meal as Recipe).name) {
+                                  usedRecipeNames.add((meal as Recipe).name);
+                                }
+                              });
+                            });
+
+                            const updatedLikedRecipes = profile.likedRecipes.map(r => {
+                              if (usedRecipeNames.has(r.name)) {
+                                return { ...r, usageCount: (r.usageCount || 0) + 1 };
+                              }
+                              return r;
+                            });
+
+                            const updatedProfile = { ...profile, likedRecipes: updatedLikedRecipes };
+                            setProfile(updatedProfile);
+                            setDb(prev => ({
+                              ...prev, 
+                              [profile.name]: {
+                                ...prev[profile.name], 
+                                weeklyPlan: pl,
+                                profile: updatedProfile
+                              }
+                            }));
+                          } else {
+                            setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], weeklyPlan: pl}}));
+                          }
+                        } catch(e){
+                          console.error("Failed to generate plan", e);
+                        } finally {
+                          setIsGeneratingPlan(false); 
+                        } 
+                      }} 
+                      onUpdateWeeklyPlan={(d, pl) => setWeeklyPlan(prev => ({...prev, [d]: pl}))} 
+                      isLoading={isGeneratingPlan} 
+                      language={language} 
+                      profile={profile} 
+                      targets={analysis?.targets} 
+                      onUpdateProfile={(up) => { 
+                        setProfile(up); 
+                        setDb(prev => ({...prev, [up.name]: {...prev[up.name], profile: up}})); 
+                      }} 
+                    />
+                  )}
+                  {activeTab === 'workout' && <WorkoutTab workoutProgram={workoutPlan} workoutLogs={workoutLogs} onGenerateWorkout={handleGenerateWorkout} onSaveLog={(log) => { const logs = [log, ...workoutLogs]; setWorkoutLogs(logs); setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], logs}})); }} onUpdateProfile={(up) => { setProfile(up); setDb(prev => ({...prev, [up.name]: {...prev[up.name], profile: up}})); }} isLoading={isGeneratingWorkout} language={language} profile={profile} />}
+                </>
               )}
-              {activeTab === 'workout' && <WorkoutTab workoutProgram={workoutPlan} workoutLogs={workoutLogs} onGenerateWorkout={handleGenerateWorkout} onSaveLog={(log) => { const logs = [log, ...workoutLogs]; setWorkoutLogs(logs); setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], logs}})); }} onUpdateProfile={(up) => { setProfile(up); setDb(prev => ({...prev, [up.name]: {...prev[up.name], profile: up}})); }} isLoading={isGeneratingWorkout} language={language} profile={profile} />}
             </div>
-          )}
+          ) : null}
         </main>
       </div>
     </>

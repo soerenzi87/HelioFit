@@ -24,22 +24,52 @@ export interface WeightEntry {
 
 export interface HealthMetricEntry {
   date: string;
+  // Activity
   steps?: number;
-  restingHeartRate?: number;
-  hrv?: number;
-  sleepHours?: number;
-  bloodPressureSys?: number;
-  bloodPressureDia?: number;
-  weight?: number;
-  bodyFat?: number;
-  leanBodyMass?: number;
-  oxygenSaturation?: number;
-  respiratoryRate?: number;
-  vo2Max?: number;
   activeEnergy?: number;
   activityMinutes?: number;
-  bloodGlucose?: number;
+  distance?: number;
+  // Vitals (daily aggregates – avg, min, max, count)
+  restingHeartRate?: number;
+  heartRateMin?: number;
+  heartRateMax?: number;
+  heartRateCount?: number;
+  hrv?: number;
+  hrvMin?: number;
+  hrvMax?: number;
+  hrvCount?: number;
+  bloodPressureSys?: number;
+  bloodPressureDia?: number;
+  oxygenSaturation?: number;
+  spo2Min?: number;
+  spo2Max?: number;
+  spo2Count?: number;
+  respiratoryRate?: number;
   bodyTemperature?: number;
+  vo2Max?: number;
+  bloodGlucose?: number;
+  // Body composition (ScaleBridge + Health Connect)
+  weight?: number;
+  bmi?: number;
+  bodyFat?: number;
+  leanBodyMass?: number;
+  musclePct?: number;
+  muscleMassKg?: number;
+  waterPct?: number;
+  proteinPct?: number;
+  boneMassKg?: number;
+  fatMassKg?: number;
+  visceralFat?: number;
+  bmr?: number;
+  bodyAge?: number;
+  healthScore?: number;
+  waistHipRatio?: number;
+  skeletalMuscleIndex?: number;
+  // Sleep
+  sleepHours?: number;
+  deepSleepMinutes?: number;
+  remSleepMinutes?: number;
+  lightSleepMinutes?: number;
 }
 
 export interface HealthInsight {
@@ -49,8 +79,27 @@ export interface HealthInsight {
   impact: 'positive' | 'neutral' | 'negative';
 }
 
+export interface HealthReading {
+  time: string;
+  value: number;
+}
+
+export interface HealthReadings {
+  heartRate: HealthReading[];
+  hrv: HealthReading[];
+  spo2: HealthReading[];
+  respiratoryRate: HealthReading[];
+  bodyTemperature: HealthReading[];
+  weight: (HealthReading & { bodyFat?: number; bmi?: number })[];
+  bloodPressure: { time: string; systolic: number; diastolic: number }[];
+  steps: { time: string; count: number }[];
+  calories: { time: string; kilocalories: number }[];
+  distance: { time: string; meters: number }[];
+}
+
 export interface HealthData {
   metrics: HealthMetricEntry[];
+  readings?: HealthReadings;
   sources?: {
     appleFiles: string[];
     googleSynced: boolean;
@@ -92,6 +141,7 @@ export interface ExerciseLog {
   sets: {
     weight: number;
     reps: number;
+    skipped?: boolean;
   }[];
 }
 
@@ -117,6 +167,13 @@ export interface WorkoutProgram {
   recoveryTips: string[];
 }
 
+export interface AIConfig {
+  geminiKey?: string;
+  openaiKey?: string;
+  claudeKey?: string;
+  preferredProvider?: 'gemini' | 'openai' | 'claude';
+}
+
 export interface WithingsConfig {
   clientId: string;
   clientSecret: string;
@@ -131,7 +188,10 @@ export interface HealthBridgeConfig {
 
 export interface UserProfile {
   name: string;
+  email?: string;
   password?: string;
+  isApproved?: boolean;
+  isAdmin?: boolean;
   age: number;
   weight: number;
   height: number;
@@ -160,6 +220,8 @@ export interface UserProfile {
     access_token: string;
     last_sync?: string;
   };
+  aiConfig?: AIConfig;
+  mockMode?: boolean;
 }
 
 export interface NutritionTargets {

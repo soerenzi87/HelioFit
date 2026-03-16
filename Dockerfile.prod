@@ -1,0 +1,37 @@
+# ── Stage 1: Build ──────────────────────────────────────────────
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+
+# Build Vite frontend → dist/
+RUN npm run build
+
+# ── Stage 2: Production ────────────────────────────────────────
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Only production deps + tsx for running TypeScript server
+COPY package*.json ./
+RUN npm ci --omit=dev && npm install tsx
+
+# Copy built frontend
+COPY --from=builder /app/dist ./dist
+
+# Copy server source (TypeScript – tsx runs it directly)
+COPY server.ts types.ts ./
+COPY routes/ ./routes/
+COPY services/ ./services/
+
+ENV NODE_ENV=production
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:8000/hb/health || exit 1
+
+CMD ["npx", "tsx", "server.ts"]

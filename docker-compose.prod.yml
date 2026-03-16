@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  heliofit:
+    image: heliofit-app:latest
+    container_name: heliofit-app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - NODE_ENV=production
+      - PORT=8000
+      - DATABASE_URL=postgres://${DB_USER:-heliofit}:${DB_PASSWORD:-heliofit_pw}@db:5432/${DB_NAME:-heliofit_db}
+      - HB_API_KEY=${HB_API_KEY}
+      - FIREBASE_SA_PATH=/app/firebase-sa.json
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - ./firebase-sa.json:/app/firebase-sa.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  db:
+    image: postgres:15-alpine
+    container_name: heliofit-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-heliofit}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-heliofit_pw}
+      POSTGRES_DB: ${DB_NAME:-heliofit_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-heliofit} -d ${DB_NAME:-heliofit_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    # DB-Port NICHT nach aussen exponieren in Production
+
+volumes:
+  pgdata:

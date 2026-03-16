@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, GenerateContentParameters, Modality } from "@google/genai";
-import { UserProfile, AIAnalysis, WeeklyMealPlan, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, Recipe, DailyMealPlan, HealthMetricEntry, HealthInsight, ProgressInsight } from "../types";
+import { UserProfile, AIAnalysis, WeeklyMealPlan, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, Recipe, DailyMealPlan, HealthMetricEntry, HealthInsight, ProgressInsight, Exercise } from "../types";
 
 let ai: any;
 try {
@@ -27,8 +27,8 @@ let _mockMode = false;
 export function setMockMode(enabled: boolean) { _mockMode = enabled; }
 export function isMockMode(): boolean { return _mockMode || process.env.USE_MOCK_GEMINI === 'true'; }
 
-async function callGeminiWithRetry(params: GenerateContentParameters, maxRetries = 3): Promise<any> {
-  if (isMockMode()) {
+async function callGeminiWithRetry(params: GenerateContentParameters, maxRetries = 3, forceMock = false): Promise<any> {
+  if (forceMock || isMockMode()) {
     const prompt = typeof params.contents === 'string' ? params.contents : JSON.stringify(params.contents);
     
     if (prompt.includes("Analysiere Gesundheitsprofil") || prompt.includes("targets")) {
@@ -123,6 +123,19 @@ async function callGeminiWithRetry(params: GenerateContentParameters, maxRetries
        ])};
     }
     
+    if (prompt.includes("alternative Übung") || prompt.includes("Alternative exercise")) {
+       return { text: JSON.stringify({
+         name: "MOCK: Kurzhantel Fliegende",
+         sets: 4,
+         reps: "10-12",
+         rest: 90,
+         notes: "Kontrollierte Bewegung, Dehnung in der unteren Position spüren",
+         suggestedWeight: "14kg",
+         equipment: "Kurzhanteln",
+         instructions: ["Auf Flachbank legen", "Kurzhanteln mit leicht gebeugten Armen seitlich absenken", "Brustmuskeln zusammendrücken und Hanteln wieder nach oben führen"]
+       })};
+    }
+
     console.log("Mock Gemini: Unbekannter Prompt", prompt);
     return { text: "{}" };
   }
@@ -183,7 +196,7 @@ export const analyzeHealthData = async (profile: UserProfile, healthData: Health
         required: ["summary", "recommendations", "targets"]
       }
     }
-  });
+  }, 3, profile.mockMode);
   return JSON.parse(extractJson(response.text));
 };
 
@@ -232,7 +245,7 @@ export const generateMealPlan = async (
         }
       }
     }
-  });
+  }, 3, profile.mockMode);
 
   const templates = JSON.parse(extractJson(response.text));
   const finalWeeklyPlan: WeeklyMealPlan = {};
@@ -323,7 +336,7 @@ export const generateWorkoutPlan = async (
         required: ["title", "description", "sessions", "recoveryTips"]
       }
     }
-  });
+  }, 3, profile.mockMode);
 
   const raw = JSON.parse(extractJson(response.text));
   return {
@@ -331,6 +344,42 @@ export const generateWorkoutPlan = async (
     id: `plan_${Date.now()}`,
     dateGenerated: new Date().toISOString()
   };
+};
+
+export const suggestAlternativeExercise = async (profile: UserProfile, exercise: Exercise, lang: Language): Promise<Exercise> => {
+  const prompt = `Schlage eine alternative Übung vor, die die GLEICHEN Muskelgruppen trainiert wie "${exercise.name}" (Equipment: ${exercise.equipment || 'unbekannt'}).
+
+WICHTIGE REGELN:
+1. Die Alternative MUSS ein ANDERES Equipment verwenden als "${exercise.equipment || 'unbekannt'}".
+2. Die Alternative muss gleichwertig in Intensität und Trainingsvolumen sein.
+3. Passe Gewicht, Sätze und Wiederholungen an das neue Equipment an (z.B. Langhantel 60kg → Kurzhantel 24kg/Seite).
+4. Gib eine klare Schritt-für-Schritt Anleitung.
+5. Die Übung soll im Fitnessstudio durchführbar sein.
+
+Aktuelle Übung: ${exercise.name}, ${exercise.sets} Sätze × ${exercise.reps} Wdh, Gewicht: ${exercise.suggestedWeight || 'k.A.'}, Pause: ${exercise.rest}s
+${getLangInstruction(lang)}`;
+
+  const response = await callGeminiWithRetry({
+    model: 'gemini-3-flash-preview',
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          name: { type: Type.STRING },
+          sets: { type: Type.NUMBER },
+          reps: { type: Type.STRING },
+          rest: { type: Type.NUMBER },
+          notes: { type: Type.STRING },
+          suggestedWeight: { type: Type.STRING },
+          equipment: { type: Type.STRING },
+          instructions: { type: Type.ARRAY, items: { type: Type.STRING } }
+        },
+      }
+    }
+  }, 3, profile.mockMode);
+  return JSON.parse(extractJson(response.text));
 };
 
 export const analyzeHealthTrends = async (healthData: HealthData, profile: UserProfile, lang: Language): Promise<HealthInsight[]> => {
@@ -354,23 +403,21 @@ export const analyzeHealthTrends = async (healthData: HealthData, profile: UserP
             category: { type: Type.STRING, enum: ["steps", "vitals", "weight", "regeneration"] },
             impact: { type: Type.STRING, enum: ["positive", "neutral", "negative"] }
           },
-          required: ["title", "detail", "category", "impact"]
-        }
       }
     }
-  });
+  }, 3, profile.mockMode);
   return JSON.parse(extractJson(response.text));
 };
 
 export const adjustDailyPlanAfterException = async (profile: UserProfile, targets: any, exceptionDesc: string, remainingMeals: string[], lang: Language): Promise<Partial<DailyMealPlan>> => {
   const prompt = `Der Benutzer ${profile.name} hat eine ungeplante Mahlzeit gegessen: "${exceptionDesc}". Passe restliche Mahlzeiten an. ${getLangInstruction(lang)}`;
-  const response = await callGeminiWithRetry({ model: 'gemini-3-flash-preview', contents: prompt });
+  const response = await callGeminiWithRetry({ model: 'gemini-3-flash-preview', contents: prompt }, 3, profile.mockMode);
   return JSON.parse(extractJson(response.text));
 };
 
-export const analyzeWorkoutProgress = async (logs: WorkoutLog[], lang: Language): Promise<string> => {
+export const analyzeWorkoutProgress = async (profile: UserProfile, logs: WorkoutLog[], lang: Language): Promise<string> => {
   const prompt = `Analysiere Trainingsfortschritt: ${JSON.stringify(logs.slice(-10))}. ${getLangInstruction(lang)}`;
-  const response = await callGeminiWithRetry({ model: 'gemini-3-flash-preview', contents: prompt });
+  const response = await callGeminiWithRetry({ model: 'gemini-3-flash-preview', contents: prompt }, 3, profile.mockMode);
   return response.text || "Analysefehler.";
 };
 
@@ -420,11 +467,9 @@ export const analyzeOverallProgress = async (profile: UserProfile, healthData: H
             impact: { type: Type.STRING, enum: ["positive", "neutral", "negative"] },
             category: { type: Type.STRING }
           },
-          required: ["title", "summary", "detail", "impact", "category"]
-        }
       }
     }
-  });
+  }, 3, profile.mockMode);
   return JSON.parse(extractJson(response.text));
 };
 

@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: healthbridge
+      POSTGRES_USER: healthbridge
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U healthbridge"]
+      interval: 5s
+      retries: 5
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://healthbridge:${DB_PASSWORD}@db:5432/healthbridge
+      JWT_SECRET: ${JWT_SECRET}
+      API_KEY_AI_STUDIO: ${API_KEY_AI_STUDIO}
+      FCM_DEVICE_TOKEN: ${FCM_DEVICE_TOKEN}
+    ports:
+      - "8001:8000"
+
+volumes:
+  pgdata:

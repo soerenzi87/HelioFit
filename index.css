@@ -1,0 +1,114 @@
+:root {
+  --app-bg: #0f172a;
+  --panel-bg: #1a1f26;
+  --accent-primary: #4f46e5; /* indigo-600 */
+  --accent-secondary: #ea580c; /* orange-600 */
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --border-subtle: rgba(255, 255, 255, 0.05);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', sans-serif;
+  background-color: var(--app-bg);
+  color: var(--text-main);
+  /* Support for iPhone safe areas */
+  padding-bottom: env(safe-area-inset-bottom);
+  overflow-x: hidden;
+}
+
+.glass-panel {
+  background: rgba(30, 41, 59, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dark-panel {
+  background: var(--panel-bg);
+  border-radius: 2.5rem;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes splash-in {
+  0% { transform: scale(0.8) rotate(-5deg); opacity: 0; filter: blur(10px); }
+  50% { transform: scale(1.1) rotate(5deg); opacity: 1; filter: blur(0px); }
+  100% { transform: scale(1) rotate(3deg); opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  0% { opacity: 0; transform: translateY(15px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes splash-exit {
+  0% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.05); pointer-events: none; }
+}
+
+.animate-splash {
+  animation: splash-in 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-splash-exit {
+  animation: splash-exit 0.8s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+
+.animate-fade-in-up {
+  opacity: 0;
+  animation: fade-in-up 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out forwards;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+/* Custom scrollbar */
+@media (min-width: 1024px) {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 10px;
+  }
+}
+
+/* Card gradients */
+.card-gradient-indigo {
+  background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
+}
+
+.card-gradient-orange {
+  background: linear-gradient(135deg, #f97316 0%, #c2410c 100%);
+}
+
+.card-gradient-emerald {
+  background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+}

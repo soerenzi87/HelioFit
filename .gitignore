@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Deploy & Secrets
+.env
+.env.deploy
+.env.prod
+firebase-sa.json
+heliofit-image.tar.gz
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

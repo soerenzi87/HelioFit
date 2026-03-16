@@ -5,6 +5,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import axios from "axios";
 import { Pool } from "pg";
+import { createTokensRouter } from "./routes/healthbridge/tokens.js";
+import { createSyncRouter } from "./routes/healthbridge/sync.js";
+import { createQueryRouter } from "./routes/healthbridge/query.js";
+import { createScaleRouter } from "./routes/healthbridge/scale.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,11 +23,13 @@ async function initDb() {
   try {
     client = await pool.connect();
     await client.query(`
+      CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
       CREATE TABLE IF NOT EXISTS user_data (
         id SERIAL PRIMARY KEY,
         data JSONB NOT NULL
       );
-      
+
       CREATE TABLE IF NOT EXISTS health_metrics (
         id SERIAL PRIMARY KEY,
         timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -31,8 +37,217 @@ async function initDb() {
         value NUMERIC NOT NULL,
         unit VARCHAR(20)
       );
-      
+
       CREATE INDEX IF NOT EXISTS idx_health_metrics_time ON health_metrics (timestamp);
+
+      -- HealthBridge tables --
+
+      CREATE TABLE IF NOT EXISTS hb_sync_tokens (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        token VARCHAR(64) UNIQUE NOT NULL,
+        user_label VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS ix_hb_sync_tokens_token ON hb_sync_tokens (token);
+
+      CREATE TABLE IF NOT EXISTS weight_records (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        weight_kg DOUBLE PRECISION NOT NULL,
+        bmi DOUBLE PRECISION,
+        body_fat_percent DOUBLE PRECISION,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_weight UNIQUE (user_id, timestamp, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_weight_user_ts ON weight_records (user_id, timestamp);
+
+      CREATE TABLE IF NOT EXISTS heart_rate_records (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        bpm INTEGER NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_heart_rate UNIQUE (user_id, timestamp, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_heart_rate_user_ts ON heart_rate_records (user_id, timestamp);
+
+      CREATE TABLE IF NOT EXISTS hrv_records (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        rmssd_ms DOUBLE PRECISION NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_hrv UNIQUE (user_id, timestamp, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_hrv_user_ts ON hrv_records (user_id, timestamp);
+
+      CREATE TABLE IF NOT EXISTS blood_pressure_records (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        systolic DOUBLE PRECISION NOT NULL,
+        diastolic DOUBLE PRECISION NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_blood_pressure UNIQUE (user_id, timestamp, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_blood_pressure_user_ts ON blood_pressure_records (user_id, timestamp);
+
+      CREATE TABLE IF NOT EXISTS oxygen_saturation_records (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        percentage DOUBLE PRECISION NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_spo2 UNIQUE (user_id, timestamp, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_spo2_user_ts ON oxygen_saturation_records (user_id, timestamp);
+
+      CREATE TABLE IF NOT EXISTS steps_records (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        count BIGINT NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_steps UNIQUE (user_id, start_time, end_time, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_steps_user_ts ON steps_records (user_id, start_time);
+
+      CREATE TABLE IF NOT EXISTS active_calories_records (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        kilocalories DOUBLE PRECISION NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_calories UNIQUE (user_id, start_time, end_time, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_calories_user_ts ON active_calories_records (user_id, start_time);
+
+      CREATE TABLE IF NOT EXISTS distance_records (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        meters DOUBLE PRECISION NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_distance UNIQUE (user_id, start_time, end_time, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_distance_user_ts ON distance_records (user_id, start_time);
+
+      CREATE TABLE IF NOT EXISTS sleep_sessions (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        duration_minutes INTEGER NOT NULL DEFAULT 0,
+        deep_sleep_minutes INTEGER NOT NULL DEFAULT 0,
+        rem_sleep_minutes INTEGER NOT NULL DEFAULT 0,
+        light_sleep_minutes INTEGER NOT NULL DEFAULT 0,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_sleep UNIQUE (user_id, start_time, end_time, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_sleep_user_ts ON sleep_sessions (user_id, start_time);
+
+      CREATE TABLE IF NOT EXISTS sleep_stages (
+        id BIGSERIAL PRIMARY KEY,
+        session_id BIGINT NOT NULL REFERENCES sleep_sessions(id) ON DELETE CASCADE,
+        start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        type VARCHAR(10) NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS respiratory_rate_records (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        breaths_per_minute DOUBLE PRECISION NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_respiratory UNIQUE (user_id, timestamp, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_respiratory_user_ts ON respiratory_rate_records (user_id, timestamp);
+
+      CREATE TABLE IF NOT EXISTS body_temperature_records (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id),
+        celsius DOUBLE PRECISION NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'HEALTH_CONNECT',
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_body_temp UNIQUE (user_id, timestamp, source)
+      );
+      CREATE INDEX IF NOT EXISTS ix_body_temp_user_ts ON body_temperature_records (user_id, timestamp);
+
+      CREATE TABLE IF NOT EXISTS scale_measurements (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID REFERENCES hb_sync_tokens(id),
+        source VARCHAR(50) NOT NULL,
+        device_id VARCHAR(100),
+        device_user_id VARCHAR(100),
+        measured_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        weight_kg DOUBLE PRECISION NOT NULL,
+        bmi DOUBLE PRECISION,
+        body_fat_pct DOUBLE PRECISION,
+        muscle_pct DOUBLE PRECISION,
+        water_pct DOUBLE PRECISION,
+        protein_pct DOUBLE PRECISION,
+        visceral_fat DOUBLE PRECISION,
+        bone_mass_kg DOUBLE PRECISION,
+        bmr_kcal DOUBLE PRECISION,
+        body_age DOUBLE PRECISION,
+        score DOUBLE PRECISION,
+        heart_rate_bpm INTEGER,
+        body_water_mass_kg DOUBLE PRECISION,
+        fat_mass_kg DOUBLE PRECISION,
+        protein_mass_kg DOUBLE PRECISION,
+        muscle_mass_kg DOUBLE PRECISION,
+        skeletal_muscle_mass_kg DOUBLE PRECISION,
+        fat_free_body_weight_kg DOUBLE PRECISION,
+        skeletal_muscle_index DOUBLE PRECISION,
+        recommended_calorie_intake_kcal DOUBLE PRECISION,
+        waist_hip_ratio DOUBLE PRECISION,
+        bone_mineral_pct DOUBLE PRECISION,
+        segmental_data JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_scale_measurement UNIQUE (device_id, measured_at)
+      );
+      CREATE INDEX IF NOT EXISTS ix_scale_measured_at ON scale_measurements (measured_at);
+
+      CREATE TABLE IF NOT EXISTS hb_fcm_devices (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id) ON DELETE CASCADE,
+        fcm_token TEXT NOT NULL,
+        device_label VARCHAR(100),
+        app_type VARCHAR(50) NOT NULL DEFAULT 'scale_bridge',
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        CONSTRAINT uq_fcm_user_token UNIQUE (user_id, fcm_token)
+      );
+      CREATE INDEX IF NOT EXISTS ix_fcm_devices_user ON hb_fcm_devices (user_id);
+
+      -- Migration: add app_type to existing installations
+      ALTER TABLE hb_fcm_devices ADD COLUMN IF NOT EXISTS app_type VARCHAR(50) NOT NULL DEFAULT 'scale_bridge';
+
+      CREATE TABLE IF NOT EXISTS hb_push_sync_acks (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES hb_sync_tokens(id) ON DELETE CASCADE,
+        app_type VARCHAR(50) NOT NULL,
+        inserted INT NOT NULL DEFAULT 0,
+        skipped INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS ix_push_sync_acks_lookup
+        ON hb_push_sync_acks (user_id, app_type, created_at);
     `);
     console.log("Database schema initialized.");
   } catch (error) {
@@ -55,6 +270,28 @@ async function startServer() {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8000;
 
   app.use(express.json({ limit: '50mb' }));
+
+  // HealthBridge API routes
+  app.use("/hb", createTokensRouter(pool));
+  app.use("/hb", createSyncRouter(pool));
+  app.use("/hb", createQueryRouter(pool));
+  app.use("/hb", createScaleRouter(pool));
+
+  // Initialize Firebase Admin SDK for FCM push-sync (optional)
+  if (process.env.FIREBASE_SA_PATH && fs.existsSync(process.env.FIREBASE_SA_PATH)) {
+    try {
+      const admin = await import("firebase-admin");
+      const { readFileSync } = await import("fs");
+      const serviceAccount = JSON.parse(readFileSync(process.env.FIREBASE_SA_PATH, "utf-8"));
+      admin.default.initializeApp({ credential: admin.default.credential.cert(serviceAccount) });
+      console.log("Firebase Admin SDK initialized for push-sync");
+    } catch (e) {
+      console.warn("Firebase init failed (FCM push-sync disabled):", e);
+    }
+  }
+
+  // Health check for HealthBridge
+  app.get("/hb/health", (_req, res) => res.json({ status: "ok" }));
 
   // API Routes
   app.get("/api/db", async (req, res) => {
