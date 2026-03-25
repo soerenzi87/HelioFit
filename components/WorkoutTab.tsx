@@ -4,6 +4,8 @@ import { WorkoutProgram, WorkoutSession, Exercise, ExistingWorkout, WorkoutLog, 
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Bar, BarChart, ComposedChart, Legend, Cell } from 'recharts';
 import { analyzeWorkoutProgress, suggestWorkoutPreferences, generateWorkoutCue, suggestAlternativeExercise, adjustWorkoutSession, WorkoutAdjustmentDraft } from '../services/geminiService';
 import { exportWorkoutToICS } from '../services/calendarService';
+import { RecoveryEntry, TrainingRecoverySummary } from '../services/recoveryService';
+import { HealthData } from '../types';
 
 declare global {
   interface Window {
@@ -23,6 +25,11 @@ interface WorkoutTabProps {
   isLoading: boolean;
   language: Language;
   profile: UserProfile | null;
+  healthData?: HealthData | null;
+  recoverySummary?: TrainingRecoverySummary | null;
+  recoveryInsight?: string | null;
+  onAnalyzeRecovery?: () => void;
+  isAnalyzingRecovery?: boolean;
 }
 
 const DAYS_DE = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
@@ -63,7 +70,7 @@ const parseMaxReps = (reps?: string): number => {
 const getDisplayWeight = (set: ExerciseLog['sets'][number]) => set.weightText || (set.weight ? `${set.weight}kg` : '-');
 const getDisplayReps = (set: ExerciseLog['sets'][number]) => set.repsText || (set.reps ? String(set.reps) : '-');
 
-const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, onGenerateWorkout, onSaveLog, onUpdateProfile, onUpdateWorkoutPlan, onInterpretManualHistory, onCompleteWeek, isLoading, language, profile }) => {
+const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, onGenerateWorkout, onSaveLog, onUpdateProfile, onUpdateWorkoutPlan, onInterpretManualHistory, onCompleteWeek, isLoading, language, profile, healthData, recoverySummary, recoveryInsight, onAnalyzeRecovery, isAnalyzingRecovery }) => {
   const [activeTab, setActiveTab] = useState<'plan' | 'stats'>('plan');
   const [selectedSession, setSelectedSession] = useState<WorkoutSession | null>(null);
   const [showConfig, setShowConfig] = useState(false);
@@ -439,6 +446,22 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
     modifyPlan: 'Plan anpassen',
     modifyPlaceholder: 'z.B. "Ersetze Kreuzheben durch Rumänisches Kreuzheben" oder "Mehr Fokus auf Schultern"...',
     modifySubmit: 'Plan mit Änderungen neu generieren',
+    recoveryTitle: 'Training & Recovery',
+    trainingLoad: 'Trainingsbelastung',
+    recoveryScore: 'Recovery Score',
+    avgRecovery: 'Ø Recovery',
+    avgLoad: 'Ø Belastung',
+    trend: 'Trend',
+    improving: 'Aufwärts',
+    stable: 'Stabil',
+    declining: 'Abwärts',
+    optimal: 'Optimal',
+    adequate: 'Ausreichend',
+    insufficient: 'Unzureichend',
+    loadRatio: 'Load/Recovery',
+    analyzeRecovery: 'Recovery analysieren',
+    analyzingRecovery: 'Analysiere...',
+    noRecoveryData: 'Noch keine Recovery-Daten. Logge Workouts und synchronisiere Gesundheitsdaten.',
   } : {
     plan: 'Workout Plan', stats: 'History & Analysis', setup: 'Workout Engine', configSub: 'Adjust training logic', create: 'Generate New Plan', adapt: 'Open Engine', focus: 'Focus', start: 'Start Workout', save: 'Save Session', weight: 'Weight (kg)', reps: 'Reps', rest: 'Rest', export: 'Export', history: 'Weekly Archive', plannedVsActual: 'Planned vs Actual', volume: 'Volume Trend', availability: 'Your available days', fixed: 'Fixed Appointments / Classes', add: 'Add Appointment', activityPlaceholder: 'e.g. Yoga Class, Soccer...',
     autoSuggest: 'AI Suggestion', suggesting: 'Analyzing Profile...',
@@ -476,6 +499,22 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
     modifyPlan: 'Modify Plan',
     modifyPlaceholder: 'e.g. "Replace deadlifts with Romanian deadlifts" or "More focus on shoulders"...',
     modifySubmit: 'Regenerate plan with changes',
+    recoveryTitle: 'Training & Recovery',
+    trainingLoad: 'Training Load',
+    recoveryScore: 'Recovery Score',
+    avgRecovery: 'Avg Recovery',
+    avgLoad: 'Avg Load',
+    trend: 'Trend',
+    improving: 'Improving',
+    stable: 'Stable',
+    declining: 'Declining',
+    optimal: 'Optimal',
+    adequate: 'Adequate',
+    insufficient: 'Insufficient',
+    loadRatio: 'Load/Recovery',
+    analyzeRecovery: 'Analyze Recovery',
+    analyzingRecovery: 'Analyzing...',
+    noRecoveryData: 'No recovery data yet. Log workouts and sync health data.',
   };
 
   const handleInterpretHistory = async () => {
@@ -1617,6 +1656,139 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
           </div>
         </div>
       )}
+
+      {/* ── Recovery & Training Load Section ── */}
+      <div className="mt-8 space-y-6">
+        <div className="flex items-center gap-3 mb-2">
+          <i className="fas fa-heartbeat text-emerald-400 text-sm"></i>
+          <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em]">{t.recoveryTitle}</h3>
+        </div>
+
+        {!recoverySummary || recoverySummary.entries.length === 0 ? (
+          <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-8 text-center">
+            <i className="fas fa-heart-circle-check text-slate-600 text-3xl mb-4"></i>
+            <p className="text-sm text-slate-500 font-medium">{t.noRecoveryData}</p>
+          </div>
+        ) : (
+          <>
+            {/* Recovery Overview Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Avg Recovery Score */}
+              <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
+                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-2">{t.avgRecovery}</p>
+                <p className="text-3xl font-black text-white">{Math.round(recoverySummary.avgRecoveryScore)}</p>
+                <p className="text-[10px] text-slate-500 font-bold mt-1">/ 100</p>
+              </div>
+              {/* Avg Training Load */}
+              <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
+                <p className="text-[9px] font-black text-orange-400 uppercase tracking-widest mb-2">{t.avgLoad}</p>
+                <p className="text-3xl font-black text-white">{Math.round(recoverySummary.avgTrainingLoad)}</p>
+              </div>
+              {/* Trend */}
+              <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">{t.trend}</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">
+                    {recoverySummary.trend === 'improving' ? '↑' : recoverySummary.trend === 'declining' ? '↓' : '→'}
+                  </span>
+                  <span className={`text-sm font-black uppercase ${recoverySummary.trend === 'improving' ? 'text-emerald-400' : recoverySummary.trend === 'declining' ? 'text-red-400' : 'text-slate-300'}`}>
+                    {recoverySummary.trend === 'improving' ? t.improving : recoverySummary.trend === 'declining' ? t.declining : t.stable}
+                  </span>
+                </div>
+              </div>
+              {/* Load/Recovery Ratio */}
+              <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
+                <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2">{t.loadRatio}</p>
+                <p className={`text-3xl font-black ${recoverySummary.loadToRecoveryRatio <= 1.2 ? 'text-emerald-400' : recoverySummary.loadToRecoveryRatio <= 1.8 ? 'text-yellow-400' : 'text-red-400'}`}>
+                  {recoverySummary.loadToRecoveryRatio.toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            {/* Recovery Timeline Chart */}
+            <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
+              <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-4">{t.trainingLoad} / {t.recoveryScore}</p>
+              <ResponsiveContainer width="100%" height={220}>
+                <ComposedChart data={recoverySummary.entries.slice(-14).map(e => ({
+                  date: e.workoutDate.slice(5),
+                  load: Math.round(e.trainingLoad),
+                  recovery: Math.round(e.recoveryScore),
+                }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 800 }} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="left" tick={{ fill: '#fb923c', fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fill: '#34d399', fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', fontSize: 12, fontWeight: 700 }} />
+                  <Bar yAxisId="left" dataKey="load" fill="#fb923c" fillOpacity={0.7} radius={[6, 6, 0, 0]} name={t.trainingLoad} />
+                  <Line yAxisId="right" type="monotone" dataKey="recovery" stroke="#34d399" strokeWidth={2.5} dot={{ fill: '#34d399', r: 3 }} name={t.recoveryScore} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Recent Recovery Entries */}
+            <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6 space-y-3">
+              <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2">{t.recoveryScore} — {language === 'de' ? 'Letzte Einträge' : 'Recent Entries'}</p>
+              {recoverySummary.entries.slice(-5).reverse().map((entry, idx) => (
+                <div key={idx} className="flex items-center justify-between gap-3 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-black text-white truncate">{entry.workoutTitle}</p>
+                    <p className="text-[10px] text-slate-500 font-bold">{entry.workoutDate.slice(0, 10)}</p>
+                    {entry.baselineHRV != null && entry.nextDayHRV != null && (
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        HRV: {Math.round(entry.baselineHRV)} → {Math.round(entry.nextDayHRV)}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-[10px] font-black text-orange-400">
+                      {Math.round(entry.trainingLoad)}
+                    </span>
+                    <span className={`px-3 py-1 rounded-full border text-[10px] font-black ${
+                      entry.recoveryScore >= 75 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                      entry.recoveryScore >= 50 ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400' :
+                      'bg-red-500/10 border-red-500/20 text-red-400'
+                    }`}>
+                      {Math.round(entry.recoveryScore)}
+                    </span>
+                    <span className={`text-[9px] font-black uppercase tracking-wider ${
+                      entry.recoveryStatus === 'optimal' ? 'text-emerald-400' :
+                      entry.recoveryStatus === 'adequate' ? 'text-yellow-400' :
+                      'text-red-400'
+                    }`}>
+                      {entry.recoveryStatus === 'optimal' ? t.optimal :
+                       entry.recoveryStatus === 'adequate' ? t.adequate :
+                       t.insufficient}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* AI Insight */}
+            <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6 space-y-4">
+              {recoveryInsight && (
+                <div className="p-5 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl">
+                  <div className="flex items-center gap-2 mb-3">
+                    <i className="fas fa-brain text-indigo-400 text-xs"></i>
+                    <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">AI Insight</p>
+                  </div>
+                  <p className="text-sm text-slate-300 font-medium leading-relaxed whitespace-pre-wrap">{recoveryInsight}</p>
+                </div>
+              )}
+              {onAnalyzeRecovery && (
+                <button
+                  onClick={onAnalyzeRecovery}
+                  disabled={isAnalyzingRecovery}
+                  className="w-full px-6 py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-400 text-white rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest transition-all border border-indigo-400/20"
+                >
+                  <i className="fas fa-wand-magic-sparkles mr-2"></i>
+                  {isAnalyzingRecovery ? t.analyzingRecovery : t.analyzeRecovery}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
 
       {showImportModal && (
         <div className="fixed inset-0 z-[300] bg-[#0f172a]/80 backdrop-blur-xl flex items-center justify-center p-6 animate-fade-in">

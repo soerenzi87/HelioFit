@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { UserProfile, HealthData, Language, HealthMetricEntry, HealthInsight, HealthDataSource, HealthMetricPreferenceKey, HealthReadings, SegmentalData } from '../types';
+import { UserProfile, HealthData, Language, HealthMetricEntry, HealthInsight, HealthDataSource, HealthMetricPreferenceKey, HealthReadings, SegmentalData, CorrelationInsight } from '../types';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, LineChart, Line, ComposedChart } from 'recharts';
 import { analyzeHealthTrends } from '../services/geminiService';
 import { processAppleHealthFile } from '../services/appleHealthService';
@@ -14,12 +14,15 @@ interface HealthTabProps {
   onUploadData: (data: HealthData, fileName: string) => void;
   isLoading: boolean;
   language: Language;
+  correlationInsights?: CorrelationInsight[] | null;
+  onAnalyzeCorrelations?: () => void;
+  isAnalyzingCorrelations?: boolean;
 }
 
 type MetricCategory = 'steps' | 'vitals' | 'weight' | 'bodycomp' | 'regeneration';
 type VitalSubType = 'heartRate' | 'hrv' | 'spo2' | 'respiratoryRate' | 'bodyTemperature' | 'bloodPressure';
 
-const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, onUpdateInsights, onResetSync, onUploadData, isLoading, language }) => {
+const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, onUpdateInsights, onResetSync, onUploadData, isLoading, language, correlationInsights, onAnalyzeCorrelations, isAnalyzingCorrelations }) => {
   const [selectedInsight, setSelectedInsight] = useState<HealthInsight | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isParsingApple, setIsParsingApple] = useState(false);
@@ -106,6 +109,16 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
     readings: 'Messwerte',
     bloodPressure: 'Blutdruck',
     source: 'Quelle',
+    correlationTitle: 'Korrelations-Analyse',
+    analyzeCorrelations: 'Zusammenhänge analysieren',
+    analyzingCorrelations: 'Analysiere Korrelationen...',
+    noCorrelations: 'Analysiere deine Daten um Zusammenhänge zwischen Metriken zu entdecken.',
+    strong: 'Stark',
+    moderate: 'Moderat',
+    weak: 'Schwach',
+    positive: 'Positiv',
+    negative: 'Negativ',
+    recommendation: 'Empfehlung',
     sourceMap: {
       google: 'Google Fit',
       apple: 'Apple Health',
@@ -189,6 +202,16 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
     readings: 'Readings',
     bloodPressure: 'Blood Pressure',
     source: 'Source',
+    correlationTitle: 'Correlation Analysis',
+    analyzeCorrelations: 'Analyze Correlations',
+    analyzingCorrelations: 'Analyzing Correlations...',
+    noCorrelations: 'Analyze your data to discover correlations between metrics.',
+    strong: 'Strong',
+    moderate: 'Moderate',
+    weak: 'Weak',
+    positive: 'Positive',
+    negative: 'Negative',
+    recommendation: 'Recommendation',
     sourceMap: {
       google: 'Google Fit',
       apple: 'Apple Health',
@@ -1408,6 +1431,98 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
                 <i className="fas fa-chevron-right text-[8px] animate-pulse text-indigo-400"></i>
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* Correlation Insights */}
+      <div className="bg-[#1a1f26] p-10 rounded-[2.5rem] border border-white/5 shadow-2xl">
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-indigo-600/10 text-indigo-400 rounded-2xl flex items-center justify-center text-xl border border-indigo-500/20 shadow-xl">
+              <i className="fas fa-diagram-project"></i>
+            </div>
+            <div>
+              <h4 className="text-2xl font-black text-white tracking-tight uppercase">{t.correlationTitle}</h4>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">
+                {correlationInsights && correlationInsights.length > 0
+                  ? `${correlationInsights.length} ${language === 'de' ? 'Zusammenhänge' : 'correlations'}`
+                  : language === 'de' ? 'Metrik-Zusammenhänge' : 'Metric relationships'}
+              </p>
+            </div>
+          </div>
+          {onAnalyzeCorrelations && (
+            <button
+              onClick={onAnalyzeCorrelations}
+              disabled={isAnalyzingCorrelations}
+              className="px-6 py-3 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/20 rounded-2xl text-xs font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {isAnalyzingCorrelations ? (
+                <span className="flex items-center gap-2">
+                  <i className="fas fa-spinner fa-spin"></i>
+                  {t.analyzingCorrelations}
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <i className="fas fa-magnifying-glass-chart"></i>
+                  {t.analyzeCorrelations}
+                </span>
+              )}
+            </button>
+          )}
+        </div>
+
+        {correlationInsights && correlationInsights.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {correlationInsights.map((ci, idx) => {
+              const barColor = ci.impact === 'positive' ? 'bg-emerald-500' : ci.impact === 'negative' ? 'bg-red-500' : 'bg-amber-500';
+              const barBgColor = ci.impact === 'positive' ? 'bg-emerald-500/10' : ci.impact === 'negative' ? 'bg-red-500/10' : 'bg-amber-500/10';
+              const strengthLabel = ci.strength === 'strong' ? t.strong : ci.strength === 'moderate' ? t.moderate : t.weak;
+              const directionLabel = ci.direction === 'positive' ? t.positive : t.negative;
+              const strengthColor = ci.strength === 'strong' ? 'bg-white/10 text-white' : ci.strength === 'moderate' ? 'bg-white/5 text-slate-300' : 'bg-white/5 text-slate-500';
+              const barWidth = Math.round(Math.abs(ci.correlation) * 100);
+
+              return (
+                <div key={idx} className="bg-white/5 rounded-[2rem] p-6 border border-white/10 flex flex-col gap-4 transition-transform hover:scale-[1.01]">
+                  <h5 className="text-lg font-black text-white tracking-tight leading-tight">{ci.title}</h5>
+
+                  {/* Correlation bar */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{directionLabel} &middot; r={ci.correlation.toFixed(2)}</span>
+                      <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full ${strengthColor}`}>{strengthLabel}</span>
+                    </div>
+                    <div className={`w-full h-2 rounded-full ${barBgColor}`}>
+                      <div className={`h-2 rounded-full ${barColor} transition-all duration-500`} style={{ width: `${barWidth}%` }}></div>
+                    </div>
+                  </div>
+
+                  {/* Metric pair */}
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                    <span className="px-3 py-1.5 bg-white/5 rounded-xl border border-white/5">{ci.metricA}</span>
+                    <span className="text-indigo-400">&harr;</span>
+                    <span className="px-3 py-1.5 bg-white/5 rounded-xl border border-white/5">{ci.metricB}</span>
+                  </div>
+
+                  {/* Explanation */}
+                  <p className="text-sm text-slate-400 leading-relaxed">{ci.explanation}</p>
+
+                  {/* Recommendation */}
+                  <div className="bg-indigo-600/10 border border-indigo-500/10 rounded-2xl p-4">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <i className="fas fa-lightbulb text-indigo-400 text-xs"></i>
+                      <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{t.recommendation}</span>
+                    </div>
+                    <p className="text-sm text-slate-300 leading-relaxed">{ci.actionable}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="py-16 px-10 bg-slate-800/20 border-2 border-dashed border-white/5 rounded-[3.5rem] w-full flex flex-col items-center justify-center gap-6 text-slate-500">
+            <i className="fas fa-diagram-project text-5xl opacity-10 text-indigo-500"></i>
+            <p className="text-sm font-bold italic text-center max-w-sm tracking-wide leading-relaxed">{t.noCorrelations}</p>
           </div>
         )}
       </div>

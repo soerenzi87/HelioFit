@@ -1,3 +1,4 @@
+import webpush from "web-push";
 import express from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
@@ -16,6 +17,15 @@ import { createScaleRouter } from "./routes/healthbridge/scale.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Push notification setup
+const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
+if (VAPID_PUBLIC && VAPID_PRIVATE) {
+  webpush.setVapidDetails('mailto:heliofit@antigravity.dev', VAPID_PUBLIC, VAPID_PRIVATE);
+}
+
+const pushSubscriptions = new Map<string, any>(); // email → PushSubscription
 
 // DB Configuration
 const pool = new Pool({
@@ -519,6 +529,60 @@ async function startServer() {
     next();
   });
 
+  // ── Push notification routes ─────────────────────────────────
+
+  app.get('/api/push/vapid-key', (req, res) => {
+    res.json({ publicKey: VAPID_PUBLIC });
+  });
+
+  app.post('/api/push/subscribe', async (req, res) => {
+    const email = (req.session as any)?.userEmail;
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+    const { subscription } = req.body;
+    pushSubscriptions.set(email, subscription);
+    // Also persist to DB
+    try {
+      const row = await readDb();
+      if (row?.db?.[email]) {
+        row.db[email].pushSubscription = subscription;
+        await writeDb(row.id, row.db);
+      }
+    } catch (e) { console.error('Push subscribe persist error:', e); }
+    res.json({ ok: true });
+  });
+
+  app.post('/api/push/unsubscribe', async (req, res) => {
+    const email = (req.session as any)?.userEmail;
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+    pushSubscriptions.delete(email);
+    try {
+      const row = await readDb();
+      if (row?.db?.[email]) {
+        delete row.db[email].pushSubscription;
+        await writeDb(row.id, row.db);
+      }
+    } catch (e) { console.error('Push unsubscribe persist error:', e); }
+    res.json({ ok: true });
+  });
+
+  app.post('/api/push/test', async (req, res) => {
+    const email = (req.session as any)?.userEmail;
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+    const sub = pushSubscriptions.get(email);
+    if (!sub) return res.status(404).json({ error: 'No subscription found' });
+    try {
+      await webpush.sendNotification(sub, JSON.stringify({
+        title: 'HelioFit',
+        body: 'Push-Benachrichtigungen funktionieren!',
+        url: '/'
+      }));
+      res.json({ ok: true });
+    } catch (err: any) {
+      if (err.statusCode === 410) { pushSubscriptions.delete(email); }
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── User-isolated API Routes ─────────────────────────────────
 
   // GET /api/db — returns only the logged-in user's data
@@ -732,6 +796,92 @@ async function startServer() {
       });
     }
   }
+
+  // ── Notification scheduler ──────────────────────────────────
+  async function checkAndSendNotifications() {
+    if (!VAPID_PUBLIC || !VAPID_PRIVATE) return;
+    try {
+      const row = await readDb();
+      if (!row?.db) return;
+
+      for (const [email, userData] of Object.entries(row.db) as [string, any][]) {
+        const sub = pushSubscriptions.get(email) || userData.pushSubscription;
+        if (!sub) continue;
+
+        const prefs = userData.profile?.notificationPreferences;
+        if (!prefs?.pushEnabled) continue;
+
+        // Anomaly detection: check if latest HRV or resting HR deviates significantly
+        if (prefs.anomalyAlerts && userData.health?.metrics?.length >= 7) {
+          const metrics = userData.health.metrics;
+          const recent = metrics.slice(-7);
+          const latest = metrics[metrics.length - 1];
+
+          if (latest?.hrv) {
+            const avgHRV = recent.reduce((s: number, m: any) => s + (m.hrv || 0), 0) / recent.filter((m: any) => m.hrv).length;
+            if (latest.hrv < avgHRV * 0.75) {
+              try {
+                await webpush.sendNotification(sub, JSON.stringify({
+                  title: 'HelioFit',
+                  body: `Deine HRV (${Math.round(latest.hrv)}) liegt deutlich unter dem Durchschnitt (${Math.round(avgHRV)}). Gönn dir Ruhe!`,
+                  url: '/'
+                }));
+              } catch (e: any) { if (e.statusCode === 410) pushSubscriptions.delete(email); }
+            }
+          }
+
+          if (latest?.restingHeartRate) {
+            const avgHR = recent.reduce((s: number, m: any) => s + (m.restingHeartRate || 0), 0) / recent.filter((m: any) => m.restingHeartRate).length;
+            if (latest.restingHeartRate > avgHR * 1.15) {
+              try {
+                await webpush.sendNotification(sub, JSON.stringify({
+                  title: 'HelioFit',
+                  body: `Dein Ruhepuls (${Math.round(latest.restingHeartRate)}) ist erhöht (Ø ${Math.round(avgHR)}). Mögliche Überbelastung oder Krankheit.`,
+                  url: '/'
+                }));
+              } catch (e: any) { if (e.statusCode === 410) pushSubscriptions.delete(email); }
+            }
+          }
+        }
+
+        // Sync reminder: check if last sync was more than 3 days ago
+        if (prefs.syncReminders) {
+          const lastSync = userData.profile?.healthBridgeTokens?.last_sync || userData.profile?.healthBridgeTokens?.health_sync_last_sync;
+          if (lastSync) {
+            const daysSinceSync = (Date.now() - new Date(lastSync).getTime()) / (1000 * 60 * 60 * 24);
+            if (daysSinceSync > 3) {
+              try {
+                await webpush.sendNotification(sub, JSON.stringify({
+                  title: 'HelioFit',
+                  body: `Letzte Synchronisierung vor ${Math.round(daysSinceSync)} Tagen. Bitte synchronisiere deine Gesundheitsdaten.`,
+                  url: '/'
+                }));
+              } catch (e: any) { if (e.statusCode === 410) pushSubscriptions.delete(email); }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Notification scheduler error:', err);
+    }
+  }
+
+  // Run scheduler every hour
+  setInterval(checkAndSendNotifications, 60 * 60 * 1000);
+
+  // Load persisted subscriptions on startup
+  (async () => {
+    try {
+      const row = await readDb();
+      if (row?.db) {
+        for (const [email, userData] of Object.entries(row.db) as [string, any][]) {
+          if (userData.pushSubscription) {
+            pushSubscriptions.set(email, userData.pushSubscription);
+          }
+        }
+      }
+    } catch (e) { console.error('Failed to load push subscriptions:', e); }
+  })();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);

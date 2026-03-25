@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type, GenerateContentParameters, Modality } from "@google/genai";
-import { UserProfile, AIAnalysis, WeeklyMealPlan, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, Recipe, DailyMealPlan, HealthMetricEntry, HealthInsight, ProgressInsight, Exercise, ManualWorkoutHistoryInterpretation, AggregatedHealthSummary, AggregatedWorkoutSummary, AggregatedProfileSummary } from "../types";
-import { aggregateHealthMetrics, aggregateWorkoutLogs, aggregateProfile, getContextPreset } from "./aggregationService";
+import { UserProfile, AIAnalysis, WeeklyMealPlan, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, Recipe, DailyMealPlan, HealthMetricEntry, HealthInsight, ProgressInsight, Exercise, ManualWorkoutHistoryInterpretation, AggregatedHealthSummary, AggregatedWorkoutSummary, AggregatedProfileSummary, CorrelationInsight } from "../types";
+import { aggregateHealthMetrics, aggregateWorkoutLogs, aggregateProfile, getContextPreset, buildCorrelationDataset } from "./aggregationService";
 import { callAI, resolveProvider, schemaToDescription, AIProvider } from "./aiProviderService";
 
 function resolveGeminiApiKey(profile?: UserProfile): string | undefined {
@@ -1280,5 +1280,187 @@ export const estimateRecipeNutrition = async (
     console.error("estimateRecipeNutrition failed:", error);
     const detail = error?.message || String(error);
     throw new Error(`Nutrition estimation failed: ${detail}`);
+  }
+};
+
+// ── Correlation Insights AI ───────────────────────────────────────────
+export const analyzeCorrelations = async (
+  healthData: HealthData,
+  workoutLogs: WorkoutLog[],
+  profile: UserProfile,
+  lang: Language
+): Promise<CorrelationInsight[]> => {
+  // 1. Call buildCorrelationDataset to get pre-computed correlations
+  const preset = getContextPreset(profile);
+  const { pairs, dailyData } = buildCorrelationDataset(healthData, preset.healthDays);
+
+  // 2. Filter pairs with |r| >= 0.2 and n >= 5
+  const significant = pairs.filter(p => Math.abs(p.r) >= 0.2 && p.n >= 5);
+
+  if (significant.length === 0) {
+    return [];
+  }
+
+  // 3. Build prompt asking AI to interpret the top correlations
+  const pairsSummary = significant
+    .slice(0, 8)
+    .map(p => `- ${p.nameA} ↔ ${p.nameB}: r=${p.r}, n=${p.n}`)
+    .join('\n');
+
+  const sampleData = dailyData.slice(-7).map(d =>
+    `${d.date}: ${Object.entries(d).filter(([k]) => k !== 'date').map(([k, v]) => `${k}=${v ?? '-'}`).join(', ')}`
+  ).join('\n');
+
+  const prompt = `${getLangInstruction(lang)}
+
+Du bist ein Gesundheits- und Fitness-Datenanalyst. Analysiere die folgenden vorberechneten Korrelationen zwischen Gesundheitsmetriken eines Nutzers.
+
+KORRELATIONEN (Pearson r, vorberechnet):
+${pairsSummary}
+
+BEISPIEL-TAGESDATEN (letzte 7 Tage):
+${sampleData}
+
+NUTZERPROFIL: ${profile.name}, ${profile.age} Jahre, ${profile.gender}, Ziele: ${profile.goals.join(', ')}, Aktivitätslevel: ${profile.activityLevel}
+
+Für JEDE Korrelation oben, erstelle eine Interpretation:
+- title: kurzer, verständlicher Titel
+- explanation: Was bedeutet diese Korrelation im Gesundheits-/Fitnesskontext?
+- actionable: Konkreter, umsetzbarer Tipp basierend auf dieser Korrelation
+- impact: Hat diese Korrelation einen "positive", "neutral" oder "negative" Einfluss auf die Gesundheit?
+- strength: "strong" (|r| >= 0.6), "moderate" (|r| >= 0.4), "weak" (|r| >= 0.2)
+- direction: "positive" oder "negative" basierend auf dem Vorzeichen von r
+
+Antworte als JSON-Array.`;
+
+  if (isMockMode() || profile.mockMode) {
+    return significant.slice(0, 3).map(p => ({
+      metricA: p.nameA,
+      metricB: p.nameB,
+      correlation: p.r,
+      strength: Math.abs(p.r) >= 0.6 ? 'strong' as const : Math.abs(p.r) >= 0.4 ? 'moderate' as const : 'weak' as const,
+      direction: p.r >= 0 ? 'positive' as const : 'negative' as const,
+      title: `${p.nameA} & ${p.nameB} Korrelation`,
+      explanation: `MOCK: ${p.nameA} und ${p.nameB} zeigen eine ${p.r >= 0 ? 'positive' : 'negative'} Korrelation (r=${p.r}).`,
+      actionable: `MOCK: Achte auf den Zusammenhang zwischen ${p.nameA} und ${p.nameB}.`,
+      impact: 'neutral' as const,
+    }));
+  }
+
+  try {
+    // 4. Use callGeminiWithRetry with JSON schema for CorrelationInsight[]
+    const response = await callGeminiWithRetry({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingBudget: 4096 },
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              metricA: { type: Type.STRING },
+              metricB: { type: Type.STRING },
+              title: { type: Type.STRING },
+              explanation: { type: Type.STRING },
+              actionable: { type: Type.STRING },
+              impact: { type: Type.STRING },
+              strength: { type: Type.STRING },
+              direction: { type: Type.STRING },
+            },
+            required: ["metricA", "metricB", "title", "explanation", "actionable", "impact", "strength", "direction"],
+          },
+        },
+      },
+    }, 3, false, resolveGeminiApiKey(profile), profile);
+
+    const rawText = response.text;
+    if (!rawText) return [];
+
+    const parsed: any[] = JSON.parse(extractJson(rawText));
+
+    // 5. Return parsed results, enriching with the computed r values
+    return parsed.map((item, idx) => {
+      const matchedPair = significant.find(p => p.nameA === item.metricA && p.nameB === item.metricB) || significant[idx];
+      return {
+        metricA: item.metricA,
+        metricB: item.metricB,
+        correlation: matchedPair?.r ?? 0,
+        strength: item.strength as CorrelationInsight['strength'],
+        direction: item.direction as CorrelationInsight['direction'],
+        title: item.title,
+        explanation: item.explanation,
+        actionable: item.actionable,
+        impact: item.impact as CorrelationInsight['impact'],
+      };
+    });
+  } catch (error: any) {
+    console.error("analyzeCorrelations failed:", error);
+    return [];
+  }
+};
+
+// ── Training Recovery AI Analysis ─────────────────────────────────────
+export const analyzeTrainingRecovery = async (
+  recoveryEntries: { workoutDate: string; workoutTitle: string; trainingLoad: number; recoveryScore: number; recoveryStatus: string; nextDayHRV?: number; baselineHRV?: number; nextDaySleepHours?: number }[],
+  avgRecoveryScore: number,
+  avgTrainingLoad: number,
+  trend: string,
+  profile: UserProfile,
+  lang: Language
+): Promise<string> => {
+  const entriesSummary = recoveryEntries
+    .slice(-10)
+    .map(e => `${e.workoutDate} | ${e.workoutTitle} | Load: ${e.trainingLoad} | Recovery: ${e.recoveryScore} (${e.recoveryStatus})${e.nextDayHRV != null ? ` | HRV: ${e.nextDayHRV}${e.baselineHRV != null ? `/${e.baselineHRV}` : ''}` : ''}${e.nextDaySleepHours != null ? ` | Sleep: ${e.nextDaySleepHours}h` : ''}`)
+    .join('\n');
+
+  const prompt = `${getLangInstruction(lang)}
+
+Du bist ein erfahrener Sportwissenschaftler und Regenerationsexperte. Analysiere die folgenden Trainings- und Erholungsdaten und gib eine detaillierte Einschätzung.
+
+ERHOLUNGSDATEN (letzte Einträge):
+${entriesSummary}
+
+ZUSAMMENFASSUNG:
+- Durchschnittlicher Recovery Score: ${avgRecoveryScore.toFixed(1)}/100
+- Durchschnittliche Trainingsbelastung: ${avgTrainingLoad.toFixed(0)}
+- Trend: ${trend}
+
+NUTZERPROFIL: ${profile.name}, ${profile.age} Jahre, ${profile.gender}, Ziele: ${profile.goals.join(', ')}, Aktivitätslevel: ${profile.activityLevel}
+
+Erstelle eine Analyse mit:
+1. Bewertung des aktuellen Trainings-Erholungs-Verhältnisses
+2. Erkannte Muster (z.B. schlechte Erholung nach bestimmten Trainingsarten)
+3. Konkrete Empfehlungen zur Trainingssteuerung
+4. Tipps zur Verbesserung der Regeneration
+5. Warnzeichen falls Übertraining droht
+
+Antworte als zusammenhängender Fließtext (kein JSON), gut strukturiert mit Absätzen.`;
+
+  if (isMockMode() || profile.mockMode) {
+    return lang === 'de'
+      ? `MOCK: Dein durchschnittlicher Recovery Score von ${avgRecoveryScore.toFixed(1)} deutet auf eine ${avgRecoveryScore >= 70 ? 'gute' : avgRecoveryScore >= 50 ? 'moderate' : 'verbesserungswürdige'} Erholung hin. Der Trend ist ${trend}. Achte darauf, nach intensiven Einheiten ausreichend Schlaf und Erholung einzuplanen. Deine Trainingsbelastung von durchschnittlich ${avgTrainingLoad.toFixed(0)} ist ${avgTrainingLoad > 500 ? 'hoch — plane regelmäßige Deload-Wochen ein' : 'im normalen Bereich'}.`
+      : `MOCK: Your average recovery score of ${avgRecoveryScore.toFixed(1)} indicates ${avgRecoveryScore >= 70 ? 'good' : avgRecoveryScore >= 50 ? 'moderate' : 'room for improvement in'} recovery. The trend is ${trend}. Make sure to get enough sleep and rest after intense sessions. Your average training load of ${avgTrainingLoad.toFixed(0)} is ${avgTrainingLoad > 500 ? 'high — consider regular deload weeks' : 'within normal range'}.`;
+  }
+
+  try {
+    const response = await callGeminiWithRetry({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingBudget: 4096 },
+      },
+    }, 3, false, resolveGeminiApiKey(profile), profile);
+
+    const rawText = response.text;
+    if (!rawText) {
+      throw new Error("Empty response from AI model");
+    }
+    return rawText.trim();
+  } catch (error: any) {
+    console.error("analyzeTrainingRecovery failed:", error);
+    const detail = error?.message || String(error);
+    throw new Error(`Training recovery analysis failed: ${detail}`);
   }
 };

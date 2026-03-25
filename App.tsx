@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { UserProfile, AIAnalysis, WeeklyMealPlan, Recipe, FitnessGoal, ActivityLevel, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, DailyMealPlan, WorkoutPreferences, HealthInsight, ProgressInsight, DEFAULT_HEALTH_SOURCE_PREFERENCES } from './types';
+import { UserProfile, AIAnalysis, WeeklyMealPlan, Recipe, FitnessGoal, ActivityLevel, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, DailyMealPlan, WorkoutPreferences, HealthInsight, ProgressInsight, DEFAULT_HEALTH_SOURCE_PREFERENCES, CorrelationInsight } from './types';
 import Dashboard from './components/Dashboard';
 import NutritionTab from './components/NutritionTab';
 import WorkoutTab from './components/WorkoutTab';
@@ -9,12 +9,14 @@ import SettingsTab from './components/SettingsTab';
 import UserProfileForm from './components/UserProfileForm';
 import AuthPortal from './components/AuthPortal';
 import AdminPanel from './components/AdminPanel';
-import { analyzeHealthData, generateMealPlan, generateWorkoutPlan, analyzeOverallProgress, analyzeHealthTrends, importManualWorkoutHistory, setMockMode } from './services/geminiService';
+import { analyzeHealthData, generateMealPlan, generateWorkoutPlan, analyzeOverallProgress, analyzeHealthTrends, importManualWorkoutHistory, setMockMode, analyzeCorrelations, analyzeTrainingRecovery } from './services/geminiService';
 import { initGoogleFitAuth, requestGoogleFitAccess, fetchGoogleFitData, revokeGoogleFitAccess } from './services/googleFitService';
 import { loginHealthBridge, fetchHealthBridgeData } from './services/healthBridgeService';
 import { generateMockHealthData, generateMockWeightHistory } from './services/mockHealthData';
 import { mergeHealthDataByPreference, cleanupHealthData, reapplySourcePreferences } from './services/healthDataMerge';
 import { apiFetch } from './services/apiFetch';
+import { computeRecoveryEntries, computeRecoverySummary, TrainingRecoverySummary } from './services/recoveryService';
+import { registerServiceWorker } from './services/pushNotificationService';
 
 type TabType = 'overview' | 'health' | 'nutrition' | 'workout' | 'settings' | 'admin';
 type AuthView = 'login' | 'register';
@@ -110,6 +112,11 @@ const App: React.FC = () => {
   const [db, setDb] = useState<Record<string, any>>({});
   const [isDbLoaded, setIsDbLoaded] = useState(false);
   const [settingsModalMode, setSettingsModalMode] = useState<SettingsModalMode>(null);
+  const [recoverySummary, setRecoverySummary] = useState<TrainingRecoverySummary | null>(null);
+  const [recoveryInsight, setRecoveryInsight] = useState<string | null>(null);
+  const [correlationInsights, setCorrelationInsights] = useState<CorrelationInsight[] | null>(null);
+  const [isAnalyzingRecovery, setIsAnalyzingRecovery] = useState(false);
+  const [isAnalyzingCorrelations, setIsAnalyzingCorrelations] = useState(false);
 
   const t = TRANSLATIONS[language];
 
@@ -165,6 +172,7 @@ const App: React.FC = () => {
           setWeeklyPlan(userData.weeklyPlan || null);
           setWorkoutPlan(userData.workoutPlan || null);
           setHealthInsights(userData.healthInsights || []);
+          if (userData.correlationInsights) setCorrelationInsights(userData.correlationInsights);
           setIsSuperLoggedIn(true);
           localStorage.setItem('heliofit_user_email', key);
         }
@@ -218,6 +226,15 @@ const App: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.healthSourcePreferences]);
+
+  // Auto-compute recovery data when workout logs or health data change
+  useEffect(() => {
+    if (workoutLogs.length > 0 && healthData?.metrics?.length) {
+      const entries = computeRecoveryEntries(workoutLogs, healthData.metrics);
+      const summary = computeRecoverySummary(entries);
+      setRecoverySummary(summary);
+    }
+  }, [workoutLogs, healthData]);
 
   useEffect(() => {
     const initAuth = () => {
@@ -538,6 +555,51 @@ const App: React.FC = () => {
     setDb(prev => ({ ...prev, [getDbKey(profile)]: { ...prev[getDbKey(profile)], healthInsights: insights } }));
   };
 
+  const handleAnalyzeRecovery = async () => {
+    if (!profile || !recoverySummary?.entries.length) return;
+    setIsAnalyzingRecovery(true);
+    try {
+      const insight = await analyzeTrainingRecovery(
+        recoverySummary.entries.map(e => ({
+          workoutDate: e.workoutDate,
+          workoutTitle: e.workoutTitle,
+          trainingLoad: e.trainingLoad,
+          recoveryScore: e.recoveryScore,
+          recoveryStatus: e.recoveryStatus,
+          nextDayHRV: e.nextDayHRV,
+          baselineHRV: e.baselineHRV,
+          nextDaySleepHours: e.nextDaySleepHours,
+        })),
+        recoverySummary.avgRecoveryScore,
+        recoverySummary.avgTrainingLoad,
+        recoverySummary.trend,
+        profile,
+        language
+      );
+      setRecoveryInsight(insight);
+    } catch (e) {
+      console.error('Recovery analysis failed:', e);
+    } finally {
+      setIsAnalyzingRecovery(false);
+    }
+  };
+
+  const handleAnalyzeCorrelations = async () => {
+    if (!profile || !healthData) return;
+    setIsAnalyzingCorrelations(true);
+    try {
+      const insights = await analyzeCorrelations(healthData, workoutLogs, profile, language);
+      setCorrelationInsights(insights);
+      // Persist to DB
+      const key = getDbKey(profile);
+      setDb(prev => ({ ...prev, [key]: { ...prev[key], correlationInsights: insights } }));
+    } catch (e) {
+      console.error('Correlation analysis failed:', e);
+    } finally {
+      setIsAnalyzingCorrelations(false);
+    }
+  };
+
   const handleGenerateWorkout = async (availableDays: string[], existing: ExistingWorkout[], sessionDurationMin?: number, modificationRequest?: string) => {
     if (!profile) return;
     setIsGeneratingWorkout(true);
@@ -796,9 +858,13 @@ const App: React.FC = () => {
               setWeeklyPlan(userData.weeklyPlan || null);
               setWorkoutPlan(userData.workoutPlan || null);
               setHealthInsights(userData.healthInsights || []);
+              if (userData.correlationInsights) setCorrelationInsights(userData.correlationInsights);
 
               setIsSuperLoggedIn(true);
               localStorage.setItem('heliofit_user_email', key);
+
+              // Register service worker for push notifications
+              registerServiceWorker();
             } catch (e) {
               console.error("Login error:", e);
               alert(language === 'de' ? 'Verbindungsfehler' : 'Connection error');
@@ -1039,18 +1105,21 @@ const App: React.FC = () => {
                     />
                   )}
                   {activeTab === 'health' && (
-                    <HealthTab 
-                      profile={profile} 
-                      healthData={healthData} 
-                      insights={healthInsights} 
-                      onUpdateInsights={handleUpdateHealthInsights} 
-                      onResetSync={handleResetGoogle} 
-                      onUploadData={(d, fileName) => { 
+                    <HealthTab
+                      profile={profile}
+                      healthData={healthData}
+                      insights={healthInsights}
+                      onUpdateInsights={handleUpdateHealthInsights}
+                      onResetSync={handleResetGoogle}
+                      onUploadData={(d, fileName) => {
                         const mergedData = mergeIncomingHealthData(d, 'apple', fileName);
                         persistMergedHealthData(mergedData);
-                      }} 
-                      isLoading={isSyncingHealth || isSyncingHealthBridge} 
-                      language={language} 
+                      }}
+                      isLoading={isSyncingHealth || isSyncingHealthBridge}
+                      language={language}
+                      correlationInsights={correlationInsights}
+                      onAnalyzeCorrelations={handleAnalyzeCorrelations}
+                      isAnalyzingCorrelations={isAnalyzingCorrelations}
                     />
                   )}
                   {activeTab === 'settings' && (
@@ -1143,7 +1212,7 @@ const App: React.FC = () => {
                       }} 
                     />
                   )}
-                  <div style={{ display: activeTab === 'workout' ? 'block' : 'none' }}><WorkoutTab workoutProgram={workoutPlan} workoutLogs={workoutLogs} onGenerateWorkout={handleGenerateWorkout} onSaveLog={(log) => { const logs = [log, ...workoutLogs]; setWorkoutLogs(logs); setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], logs}})); }} onUpdateProfile={(up) => { setProfile(up); setDb(prev => ({...prev, [getDbKey(up)]: {...prev[getDbKey(up)], profile: up}})); }} onUpdateWorkoutPlan={(plan) => { setWorkoutPlan(plan); setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], workoutPlan: plan}})); }} onInterpretManualHistory={handleImportManualWorkoutHistory} onCompleteWeek={handleCompleteWorkoutWeek} isLoading={isGeneratingWorkout} language={language} profile={profile} /></div>
+                  <div style={{ display: activeTab === 'workout' ? 'block' : 'none' }}><WorkoutTab workoutProgram={workoutPlan} workoutLogs={workoutLogs} onGenerateWorkout={handleGenerateWorkout} onSaveLog={(log) => { const logs = [log, ...workoutLogs]; setWorkoutLogs(logs); setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], logs}})); }} onUpdateProfile={(up) => { setProfile(up); setDb(prev => ({...prev, [getDbKey(up)]: {...prev[getDbKey(up)], profile: up}})); }} onUpdateWorkoutPlan={(plan) => { setWorkoutPlan(plan); setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], workoutPlan: plan}})); }} onInterpretManualHistory={handleImportManualWorkoutHistory} onCompleteWeek={handleCompleteWorkoutWeek} isLoading={isGeneratingWorkout} language={language} profile={profile} healthData={healthData} recoverySummary={recoverySummary} recoveryInsight={recoveryInsight} onAnalyzeRecovery={handleAnalyzeRecovery} isAnalyzingRecovery={isAnalyzingRecovery} /></div>
                 </>
               )}
             </div>

@@ -364,6 +364,7 @@ export interface UserProfile {
   eatenMeals?: Record<string, string>; // key: "day|mealType", value: ISO timestamp
   additionalFood?: Record<string, string>; // key: day name, value: free text of extra food eaten
   nutritionHistory?: { plan: WeeklyMealPlan; completedAt: string; eatenMeals: Record<string, string>; additionalFood?: Record<string, any> }[];
+  notificationPreferences?: NotificationPreferences;
 }
 
 export interface NutritionTargets {
@@ -411,4 +412,25 @@ export interface AIAnalysis {
   summary: string;
   recommendations: string[];
   targets: NutritionTargets;
+}
+
+// ── Correlation Insights ──────────────────────────────────────
+export interface CorrelationInsight {
+  metricA: string;
+  metricB: string;
+  correlation: number;        // -1 to 1 (Pearson r)
+  strength: 'strong' | 'moderate' | 'weak';
+  direction: 'positive' | 'negative';
+  title: string;
+  explanation: string;
+  actionable: string;          // concrete recommendation
+  impact: 'positive' | 'neutral' | 'negative';
+}
+
+// ── Notification Preferences ──────────────────────────────────
+export interface NotificationPreferences {
+  pushEnabled: boolean;
+  syncReminders: boolean;
+  weeklyReport: boolean;
+  anomalyAlerts: boolean;
 }

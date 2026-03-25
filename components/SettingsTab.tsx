@@ -1,7 +1,8 @@
 
-import React, { useState, useRef } from 'react';
-import { UserProfile, HealthData, Language, FitnessGoal, ActivityLevel, HealthDataSource, HealthMetricPreferenceKey, DEFAULT_HEALTH_SOURCE_PREFERENCES, AIContextSize, AI_CONTEXT_PRESETS } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import { UserProfile, HealthData, Language, FitnessGoal, ActivityLevel, HealthDataSource, HealthMetricPreferenceKey, DEFAULT_HEALTH_SOURCE_PREFERENCES, AIContextSize, AI_CONTEXT_PRESETS, NotificationPreferences } from '../types';
 import { processAppleHealthFile } from '../services/appleHealthService';
+import { isPushSupported, subscribeToPush, unsubscribeFromPush, getSubscriptionStatus, registerServiceWorker } from '../services/pushNotificationService';
 
 const GeminiLogo = () => (
   <svg viewBox="0 0 64 64" className="w-8 h-8" aria-hidden="true">
@@ -95,9 +96,18 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
   const [preferredProvider, setPreferredProvider] = useState<'gemini' | 'openai' | 'claude'>(profile.aiConfig?.preferredProvider || 'gemini');
   const [contextSize, setContextSize] = useState<AIContextSize>(profile.aiConfig?.contextSize || 'medium');
 
+  const [pushStatus, setPushStatus] = useState<boolean>(false);
+  const [isPushLoading, setIsPushLoading] = useState(false);
+
   const [isParsingApple, setIsParsingApple] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const profilePicRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isPushSupported()) {
+      getSubscriptionStatus().then(setPushStatus);
+    }
+  }, []);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -220,6 +230,18 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
     noSourceAvailable: 'Noch keine aktive Quelle mit diesem Wert erkannt',
     resetMockData: 'Mockdaten zurücksetzen',
     resetMockDataSub: 'Setzt Demo-Gesundheitsdaten und Demo-Gewichtsverlauf auf den Standardzustand zurück.',
+    notifications: 'Benachrichtigungen',
+    pushNotSupported: 'Dein Browser unterstützt keine Push-Benachrichtigungen.',
+    enablePush: 'Push aktivieren',
+    disablePush: 'Push deaktivieren',
+    syncReminders: 'Sync-Erinnerungen',
+    syncRemindersSub: 'Benachrichtigung wenn >3 Tage nicht synchronisiert',
+    weeklyReport: 'Wöchentlicher Report',
+    weeklyReportSub: 'Jeden Sonntag eine Zusammenfassung',
+    anomalyAlerts: 'Anomalie-Warnungen',
+    anomalyAlertsSub: 'Warnung bei ungewöhnlichen Vitalwerten (HRV, Puls)',
+    testNotification: 'Test-Benachrichtigung',
+    testSent: 'Gesendet!',
     resetAllData: 'Alle Daten zurücksetzen',
     resetAllDataTitle: 'Kompletter Daten-Reset',
     resetAllDataSub: 'Löscht Trainingshistorie, Gesundheitsdaten, Pläne, Favoriten, Analysen und gespeicherte Verbindungen für diesen Account.',
@@ -308,6 +330,18 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
     noSourceAvailable: 'No active source has delivered this metric yet',
     resetMockData: 'Reset Mock Data',
     resetMockDataSub: 'Resets demo health data and demo weight history back to the default state.',
+    notifications: 'Notifications',
+    pushNotSupported: 'Your browser does not support push notifications.',
+    enablePush: 'Enable Push',
+    disablePush: 'Disable Push',
+    syncReminders: 'Sync Reminders',
+    syncRemindersSub: 'Notification when >3 days without sync',
+    weeklyReport: 'Weekly Report',
+    weeklyReportSub: 'A weekly summary every Sunday',
+    anomalyAlerts: 'Anomaly Alerts',
+    anomalyAlertsSub: 'Alert on unusual vital signs (HRV, heart rate)',
+    testNotification: 'Test Notification',
+    testSent: 'Sent!',
     resetAllData: 'Reset All Data',
     resetAllDataTitle: 'Full Data Reset',
     resetAllDataSub: 'Deletes workout history, health data, plans, favorites, analyses, and saved connections for this account.',
@@ -877,6 +911,123 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
                   );
                 })}
               </div>
+            </div>
+
+            {/* ── PUSH NOTIFICATIONS ── */}
+            <div className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 space-y-6">
+              <div className="flex items-center gap-5">
+                <div className="w-14 h-14 bg-amber-500/15 rounded-2xl flex items-center justify-center text-amber-400 text-xl shrink-0">
+                  <i className="fas fa-bell"></i>
+                </div>
+                <div>
+                  <h4 className="text-white font-black uppercase tracking-tight text-sm">{t.notifications}</h4>
+                </div>
+              </div>
+
+              {!isPushSupported() ? (
+                <p className="text-slate-400 text-xs">{t.pushNotSupported}</p>
+              ) : (
+                <div className="space-y-4">
+                  <button
+                    disabled={isPushLoading}
+                    onClick={async () => {
+                      setIsPushLoading(true);
+                      try {
+                        if (!pushStatus) {
+                          await registerServiceWorker();
+                          await subscribeToPush(profile.email);
+                          setPushStatus(true);
+                          onUpdateProfile({
+                            ...profile,
+                            notificationPreferences: {
+                              pushEnabled: true,
+                              syncReminders: true,
+                              weeklyReport: true,
+                              anomalyAlerts: true,
+                              ...(profile.notificationPreferences || {}),
+                            },
+                          });
+                        } else {
+                          await unsubscribeFromPush(profile.email);
+                          setPushStatus(false);
+                          onUpdateProfile({
+                            ...profile,
+                            notificationPreferences: {
+                              ...(profile.notificationPreferences || { syncReminders: true, weeklyReport: true, anomalyAlerts: true }),
+                              pushEnabled: false,
+                            },
+                          });
+                        }
+                      } catch (err) {
+                        console.error(err);
+                      } finally {
+                        setIsPushLoading(false);
+                      }
+                    }}
+                    className={`w-full px-6 py-4 rounded-2xl border font-black uppercase tracking-widest text-[10px] transition-all ${
+                      pushStatus
+                        ? 'bg-amber-500/15 border-amber-400/20 text-amber-200 hover:bg-amber-500/25'
+                        : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
+                    }`}
+                  >
+                    <i className={`fas ${pushStatus ? 'fa-bell-slash' : 'fa-bell'} mr-2`}></i>
+                    {isPushLoading ? '...' : pushStatus ? t.disablePush : t.enablePush}
+                  </button>
+
+                  {pushStatus && (
+                    <div className="space-y-3">
+                      {([
+                        { key: 'syncReminders' as const, label: t.syncReminders, sub: t.syncRemindersSub },
+                        { key: 'weeklyReport' as const, label: t.weeklyReport, sub: t.weeklyReportSub },
+                        { key: 'anomalyAlerts' as const, label: t.anomalyAlerts, sub: t.anomalyAlertsSub },
+                      ]).map(({ key, label, sub }) => {
+                        const checked = profile.notificationPreferences?.[key] ?? true;
+                        return (
+                          <label key={key} className="flex items-center justify-between gap-4 bg-slate-900 p-5 rounded-2xl border border-white/5 cursor-pointer">
+                            <div>
+                              <p className="text-white font-black text-xs uppercase tracking-widest">{label}</p>
+                              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-1">{sub}</p>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                onUpdateProfile({
+                                  ...profile,
+                                  notificationPreferences: {
+                                    pushEnabled: true,
+                                    syncReminders: true,
+                                    weeklyReport: true,
+                                    anomalyAlerts: true,
+                                    ...(profile.notificationPreferences || {}),
+                                    [key]: !checked,
+                                  },
+                                })
+                              }
+                              className="w-5 h-5 accent-amber-500 cursor-pointer shrink-0"
+                            />
+                          </label>
+                        );
+                      })}
+
+                      <button
+                        onClick={async () => {
+                          try {
+                            await fetch('/api/push/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: profile.email }) });
+                            alert(t.testSent);
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="w-full px-6 py-4 bg-white/5 hover:bg-white/10 text-white rounded-2xl border border-white/10 font-black uppercase tracking-widest text-[10px] transition-all"
+                      >
+                        <i className="fas fa-paper-plane mr-2"></i>
+                        {t.testNotification}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="bg-red-500/10 border border-red-500/20 rounded-[2.5rem] p-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
