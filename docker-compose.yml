@@ -16,6 +16,7 @@ services:
       - PORT=8000
       - DATABASE_URL=postgres://heliofit:heliofit_pw@db:5432/heliofit_db
       - HB_API_KEY=${HB_API_KEY:-change-me}
+      - API_SECRET=${API_SECRET:-dev-secret-change-me}
       - FIREBASE_SA_PATH=${FIREBASE_SA_PATH:-}
     env_file:
       - .env

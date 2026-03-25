@@ -12,6 +12,7 @@ services:
       - PORT=8000
       - DATABASE_URL=postgres://${DB_USER:-heliofit}:${DB_PASSWORD:-heliofit_pw}@db:5432/${DB_NAME:-heliofit_db}
       - HB_API_KEY=${HB_API_KEY}
+      - SESSION_SECRET=${SESSION_SECRET:-${API_SECRET}}
       - FIREBASE_SA_PATH=/app/firebase-sa.json
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     volumes:

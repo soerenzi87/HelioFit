@@ -131,9 +131,8 @@ export function createScaleRouter(pool: Pool): Router {
       const result = await pool.query(
         `INSERT INTO hb_fcm_devices (user_id, fcm_token, device_label, app_type, updated_at)
          VALUES ($1, $2, $3, $4, NOW())
-         ON CONFLICT ON CONSTRAINT uq_fcm_user_token
+         ON CONFLICT ON CONSTRAINT uq_fcm_user_token_apptype
          DO UPDATE SET device_label = COALESCE(EXCLUDED.device_label, hb_fcm_devices.device_label),
-                       app_type = EXCLUDED.app_type,
                        updated_at = NOW()
          RETURNING id, fcm_token, device_label, app_type, updated_at`,
         [uid, fcm_token, device_label ?? null, resolvedAppType]
@@ -254,6 +253,16 @@ export function createScaleRouter(pool: Pool): Router {
           )
         );
 
+        // Log all results for debugging
+        sendResults.forEach((result, idx) => {
+          const device = devicesResult.rows[idx];
+          if (result.status === "fulfilled") {
+            console.log(`Push-sync [${appType}]: FCM sent OK to device ${device.id} (${device.device_label}): ${result.value}`);
+          } else {
+            console.error(`Push-sync [${appType}]: FCM FAILED for device ${device.id} (${device.device_label}): ${result.reason}`);
+          }
+        });
+
         // Remove devices whose tokens are no longer valid
         const staleDeviceIds: string[] = [];
         sendResults.forEach((result, idx) => {
@@ -275,13 +284,31 @@ export function createScaleRouter(pool: Pool): Router {
 
         const succeeded = sendResults.filter((r) => r.status === "fulfilled").length;
         if (succeeded === 0) {
-          res.status(502).json({ detail: "FCM send failed for all registered devices" });
+          const errors = sendResults.filter(r => r.status === "rejected").map(r => String((r as PromiseRejectedResult).reason));
+          res.status(502).json({ detail: "FCM send failed for all registered devices", errors });
           return;
         }
       } catch (e) {
         console.error("FCM send failed:", e);
         res.status(502).json({ detail: `FCM send failed: ${e}` });
         return;
+      }
+
+      // Check if there is already data newer than the client's last sync (sent as `since`)
+      const sinceParam = req.body.since;
+      if (appType === "scale_bridge" && sinceParam) {
+        const sinceDate = new Date(sinceParam);
+        if (!isNaN(sinceDate.getTime())) {
+          const existing = await pool.query(
+            "SELECT * FROM scale_measurements WHERE user_id = $1 AND measured_at > $2 ORDER BY measured_at DESC LIMIT 1",
+            [uid, sinceDate]
+          );
+          if (existing.rows.length > 0) {
+            console.log(`Push-sync [${appType}]: found existing data since ${sinceParam}, returning immediately`);
+            res.json({ status: "ok", waited_seconds: 0, data: formatScale(existing.rows[0]) });
+            return;
+          }
+        }
       }
 
       // Poll DB for new data – table depends on app type
@@ -330,7 +357,23 @@ export function createScaleRouter(pool: Pool): Router {
         }
       }
 
-      // Timeout
+      // Timeout – still return latest measurement if available (dedup on phone = no new POST but data exists)
+      if (appType === "scale_bridge") {
+        const latest = await pool.query(
+          "SELECT * FROM scale_measurements WHERE user_id = $1 ORDER BY measured_at DESC LIMIT 1",
+          [uid]
+        );
+        if (latest.rows.length > 0) {
+          console.log(`Push-sync [${appType}]: timeout but returning latest existing measurement`);
+          res.json({
+            status: "ok_existing",
+            message: `No new data within ${PUSH_SYNC_TIMEOUT / 1000}s, returning latest existing measurement`,
+            waited_seconds: PUSH_SYNC_TIMEOUT / 1000,
+            data: formatScale(latest.rows[0]),
+          });
+          return;
+        }
+      }
       res.json({
         status: "timeout",
         message: `No fresh data within ${PUSH_SYNC_TIMEOUT / 1000}s`,

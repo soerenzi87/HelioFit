@@ -1,4 +1,8 @@
 import express from "express";
+import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
+import bcrypt from "bcryptjs";
+import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import path from "path";
@@ -231,7 +235,7 @@ async function initDb() {
         device_label VARCHAR(100),
         app_type VARCHAR(50) NOT NULL DEFAULT 'scale_bridge',
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        CONSTRAINT uq_fcm_user_token UNIQUE (user_id, fcm_token)
+        CONSTRAINT uq_fcm_user_token_apptype UNIQUE (user_id, fcm_token, app_type)
       );
       CREATE INDEX IF NOT EXISTS ix_fcm_devices_user ON hb_fcm_devices (user_id);
 
@@ -250,6 +254,40 @@ async function initDb() {
         ON hb_push_sync_acks (user_id, app_type, created_at);
     `);
     console.log("Database schema initialized.");
+
+    // Migrate plaintext passwords to bcrypt hashes
+    const dbResult = await client.query("SELECT id, data FROM user_data ORDER BY id DESC LIMIT 1");
+    if (dbResult.rows.length > 0) {
+      const { id: rowId, data: rawData } = dbResult.rows[0];
+      const db = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+      let changed = false;
+      for (const [key, userData] of Object.entries(db) as [string, any][]) {
+        if (userData?.profile?.password && !userData.profile.password.startsWith('$2')) {
+          userData.profile.password = bcrypt.hashSync(userData.profile.password, 12);
+          changed = true;
+          console.log(`[Migration] Hashed password for ${key}`);
+        }
+      }
+      // Seed admin if missing
+      const adminEmail = 'admin@heliofit.ai';
+      if (!db[adminEmail]) {
+        db[adminEmail] = {
+          profile: {
+            name: 'Admin', email: adminEmail,
+            password: bcrypt.hashSync('admin123', 12),
+            isApproved: true, isAdmin: true,
+            age: 30, weight: 75, height: 180, gender: 'male',
+            goals: [], activityLevel: 'MODERATE',
+          },
+          logs: [], health: null,
+        };
+        changed = true;
+        console.log("[Migration] Seeded admin user with hashed password");
+      }
+      if (changed) {
+        await client.query("UPDATE user_data SET data = $1 WHERE id = $2", [JSON.stringify(db), rowId]);
+      }
+    }
   } catch (error) {
     console.error("Error initializing database schema:", error);
   } finally {
@@ -257,21 +295,79 @@ async function initDb() {
   }
 }
 
-// Withings API Config
-const WITHINGS_CLIENT_ID = process.env.WITHINGS_CLIENT_ID;
-const WITHINGS_CLIENT_SECRET = process.env.WITHINGS_CLIENT_SECRET;
-const WITHINGS_AUTH_URL = "https://account.withings.com/oauth2_user/authorize2";
-const WITHINGS_TOKEN_URL = "https://wbsapi.withings.net/v2/oauth2";
+/** Helper: read full DB JSONB blob */
+async function readDb(): Promise<{ id: number; db: Record<string, any> } | null> {
+  const result = await pool.query("SELECT id, data FROM user_data ORDER BY id DESC LIMIT 1");
+  if (result.rows.length === 0) return null;
+  const { id, data } = result.rows[0];
+  return { id, db: typeof data === 'string' ? JSON.parse(data) : data };
+}
+
+/** Helper: write full DB JSONB blob */
+async function writeDb(id: number, db: Record<string, any>) {
+  await pool.query("UPDATE user_data SET data = $1 WHERE id = $2", [JSON.stringify(db), id]);
+}
+
+/** SSRF protection: only allow known HealthBridge hosts */
+const HEALTHBRIDGE_ALLOWED_HOSTS = new Set(
+  (process.env.HEALTHBRIDGE_ALLOWED_HOSTS || 'health.soerenzieger.de').split(',').map(h => h.trim())
+);
+function isAllowedHealthBridgeUrl(baseUrl: string): boolean {
+  try {
+    const parsed = new URL(baseUrl);
+    if (parsed.protocol !== 'https:') return false;
+    return HEALTHBRIDGE_ALLOWED_HOSTS.has(parsed.hostname);
+  } catch { return false; }
+}
 
 async function startServer() {
   await initDb();
-  
+
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8000;
 
+  // Trust proxy (Cloudflare/nginx) for rate limiting and secure cookies
+  app.set('trust proxy', 1);
+
   app.use(express.json({ limit: '50mb' }));
 
-  // HealthBridge API routes
+  // ── Session middleware ────────────────────────────────────────
+  const SESSION_SECRET = process.env.SESSION_SECRET || process.env.API_SECRET;
+  if (!SESSION_SECRET) {
+    console.error("FATAL: SESSION_SECRET (or API_SECRET fallback) not configured");
+    process.exit(1);
+  }
+  const PgSession = connectPgSimple(session);
+  app.use(session({
+    store: new PgSession({ pool, createTableIfMissing: true }),
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    },
+  }));
+
+  // ── Rate limiting ────────────────────────────────────────────
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 min
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many login attempts. Try again later.' },
+  });
+  const apiLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 min
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+  app.use('/api', apiLimiter);
+
+  // ── HealthBridge API routes (own auth via sync tokens) ───────
   app.use("/hb", createTokensRouter(pool));
   app.use("/hb", createSyncRouter(pool));
   app.use("/hb", createQueryRouter(pool));
@@ -293,26 +389,220 @@ async function startServer() {
   // Health check for HealthBridge
   app.get("/hb/health", (_req, res) => res.json({ status: "ok" }));
 
-  // API Routes
-  app.get("/api/db", async (req, res) => {
+  // ── Auth endpoints (public) ──────────────────────────────────
+
+  app.post("/api/auth/login", loginLimiter, async (req, res) => {
+    const { email, password, isGoogle } = req.body;
+    if (!email) return res.status(400).json({ error: "Email required" });
+
     try {
-      const result = await pool.query("SELECT data FROM user_data ORDER BY id DESC LIMIT 1");
-      if (result.rows.length > 0) {
-        res.json(result.rows[0].data);
-      } else {
-        res.json({});
+      const row = await readDb();
+      if (!row) return res.status(500).json({ error: "No database" });
+      let userData = row.db[email];
+
+      if (isGoogle && !userData?.profile) {
+        // Google login for first-time user — auto-create pending profile
+        row.db[email] = {
+          profile: {
+            name: email, email,
+            isApproved: false,
+            age: 30, weight: 75, height: 180, gender: 'male',
+            goals: [], activityLevel: 'MODERATE',
+          },
+          logs: [], health: null, weeklyPlan: null, workoutPlan: null,
+          analysis: null, progressAnalysis: null, healthInsights: [],
+        };
+        await writeDb(row.id, row.db);
+        return res.status(403).json({ error: "pending_approval" });
       }
+
+      if (!userData?.profile) return res.status(401).json({ error: "User not found" });
+
+      if (isGoogle) {
+        // Google login — no password check (trust Google ID token from client)
+      } else {
+        if (!password) return res.status(400).json({ error: "Password required" });
+        const stored = userData.profile.password;
+        if (!stored) return res.status(401).json({ error: "Invalid credentials" });
+
+        // Compare: supports both bcrypt hashes and legacy plaintext (should be migrated already)
+        const isHash = stored.startsWith('$2');
+        const match = isHash ? await bcrypt.compare(password, stored) : (password === stored);
+        if (!match) return res.status(401).json({ error: "Invalid credentials" });
+
+        // If plaintext was still found, hash it now
+        if (!isHash) {
+          userData.profile.password = await bcrypt.hash(password, 12);
+          await writeDb(row.id, row.db);
+        }
+      }
+
+      if (userData.profile.isApproved === false) {
+        return res.status(403).json({ error: "pending_approval" });
+      }
+
+      // Set session
+      (req.session as any).userEmail = email;
+      (req.session as any).isAdmin = !!userData.profile.isAdmin;
+
+      // Return profile without password
+      const { password: _pw, ...safeProfile } = userData.profile;
+      res.json({ profile: safeProfile, userData: { ...userData, profile: safeProfile } });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ error: "Login failed" });
+    }
+  });
+
+  app.post("/api/auth/register", loginLimiter, async (req, res) => {
+    const { profile: newProfile } = req.body;
+    if (!newProfile?.name || !newProfile?.password) {
+      return res.status(400).json({ error: "Name and password required" });
+    }
+    try {
+      const row = await readDb();
+      const key = newProfile.email || newProfile.name;
+      const db = row?.db || {};
+      if (db[key]) return res.status(409).json({ error: "User already exists" });
+
+      newProfile.password = await bcrypt.hash(newProfile.password, 12);
+      newProfile.isApproved = false;
+      db[key] = { profile: newProfile, logs: [], health: null, weeklyPlan: null, workoutPlan: null, analysis: null, progressAnalysis: null, healthInsights: [] };
+
+      if (row) {
+        await writeDb(row.id, db);
+      } else {
+        await pool.query("INSERT INTO user_data (data) VALUES ($1)", [JSON.stringify(db)]);
+      }
+      res.json({ status: "ok" });
+    } catch (error) {
+      console.error("Register error:", error);
+      res.status(500).json({ error: "Registration failed" });
+    }
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy(() => {
+      res.clearCookie('connect.sid');
+      res.json({ status: "ok" });
+    });
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    const email = (req.session as any)?.userEmail;
+    if (!email) return res.status(401).json({ error: "Not authenticated" });
+    try {
+      const row = await readDb();
+      if (!row) return res.status(500).json({ error: "No database" });
+      const userData = row.db[email];
+      if (!userData) return res.status(401).json({ error: "User not found" });
+      const { password: _pw, ...safeProfile } = userData.profile;
+      res.json({ profile: safeProfile, userData: { ...userData, profile: safeProfile } });
+    } catch (error) {
+      console.error("Auth/me error:", error);
+      res.status(500).json({ error: "Failed to restore session" });
+    }
+  });
+
+  // ── Session auth middleware for all other /api/* routes ───────
+  app.use("/api", (req, res, next) => {
+    // Auth endpoints are public
+    if (req.path.startsWith("/auth/")) { next(); return; }
+    const email = (req.session as any)?.userEmail;
+    if (!email) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    // Attach to request for downstream handlers
+    (req as any).userEmail = email;
+    (req as any).isAdmin = !!(req.session as any).isAdmin;
+    next();
+  });
+
+  // ── User-isolated API Routes ─────────────────────────────────
+
+  // GET /api/db — returns only the logged-in user's data
+  app.get("/api/db", async (req, res) => {
+    const email = (req as any).userEmail;
+    try {
+      const row = await readDb();
+      if (!row) return res.json({});
+      const userData = row.db[email];
+      if (!userData) return res.json({});
+      // Strip password from profile
+      if (userData.profile) {
+        const { password: _pw, ...safeProfile } = userData.profile;
+        return res.json({ [email]: { ...userData, profile: safeProfile } });
+      }
+      res.json({ [email]: userData });
     } catch (error) {
       console.error("Error reading DB:", error);
       res.status(500).json({ error: "Failed to read database" });
     }
   });
 
+  // POST /api/db — writes only the logged-in user's data
   app.post("/api/db", async (req, res) => {
+    const email = (req as any).userEmail;
+    const isAdmin = (req as any).isAdmin;
     try {
-      // Store the whole document temporarily for backwards compatibility until UI changes
-      // In production, split this into different endpoints and health_metrics table inserts
-      await pool.query("INSERT INTO user_data (data) VALUES ($1)", [req.body]);
+      const newData = req.body;
+      const row = await readDb();
+
+      if (row) {
+        const merged = { ...row.db };
+
+        // Determine which keys this user is allowed to write
+        const allowedKeys = isAdmin ? Object.keys(newData) : [email];
+
+        for (const userKey of allowedKeys) {
+          if (!newData[userKey]) continue;
+          // Always strip password from incoming profile data (passwords go through /api/admin/password or /api/auth/register)
+          if (newData[userKey]?.profile?.password) {
+            delete newData[userKey].profile.password;
+          }
+          if (!merged[userKey]) {
+            merged[userKey] = newData[userKey];
+            continue;
+          }
+          const oldUser = merged[userKey];
+          const newUser = newData[userKey];
+
+          for (const field of Object.keys(newUser)) {
+            if (field === 'profile' && oldUser.profile && newUser.profile) {
+              // Never let client overwrite the hashed password
+              const existingPw = oldUser.profile.password;
+              oldUser.profile = { ...oldUser.profile, ...newUser.profile };
+              if (existingPw) oldUser.profile.password = existingPw;
+
+              // Preserve nutritionPreferences ingredients
+              const oldPrefs = row.db[userKey]?.profile?.nutritionPreferences;
+              const newPrefs = newUser.profile?.nutritionPreferences;
+              if (oldPrefs) {
+                const mergedNutPrefs = {
+                  ...(newPrefs || oldPrefs),
+                  preferredIngredients: (newPrefs?.preferredIngredients?.length > 0) ? newPrefs.preferredIngredients : (oldPrefs.preferredIngredients?.length > 0 ? oldPrefs.preferredIngredients : (newPrefs?.preferredIngredients || [])),
+                  excludedIngredients: (newPrefs?.excludedIngredients?.length > 0) ? newPrefs.excludedIngredients : (oldPrefs.excludedIngredients?.length > 0 ? oldPrefs.excludedIngredients : (newPrefs?.excludedIngredients || [])),
+                };
+                oldUser.profile.nutritionPreferences = mergedNutPrefs;
+              }
+            } else {
+              const oldVal = oldUser[field];
+              const newVal = newUser[field];
+              const oldHasData = oldVal != null && oldVal !== '' && !(Array.isArray(oldVal) && oldVal.length === 0) && !(typeof oldVal === 'object' && !Array.isArray(oldVal) && Object.keys(oldVal).length === 0);
+              if (newVal == null && oldHasData) continue;
+              if (Array.isArray(newVal) && newVal.length === 0 && oldHasData) continue;
+              if (typeof newVal === 'object' && newVal !== null && !Array.isArray(newVal) && Object.keys(newVal).length === 0 && oldHasData) continue;
+              if (newVal != null) oldUser[field] = newVal;
+            }
+          }
+          merged[userKey] = oldUser;
+        }
+
+        await writeDb(row.id, merged);
+      } else {
+        await pool.query("INSERT INTO user_data (data) VALUES ($1)", [JSON.stringify(newData)]);
+      }
       res.json({ status: "ok" });
     } catch (error) {
       console.error("Error writing DB:", error);
@@ -320,124 +610,82 @@ async function startServer() {
     }
   });
 
-  // Withings OAuth Routes
-  app.get("/api/auth/withings/url", (req, res) => {
-    const { clientId, clientSecret } = req.query;
-    const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-    // Ensure https for redirectUri in production/preview
-    const redirectUri = `${appUrl.replace('http://', 'https://')}/api/auth/withings/callback`;
-    
-    // Encode clientId and clientSecret into state to retrieve them in callback
-    const state = Buffer.from(JSON.stringify({ clientId, clientSecret })).toString('base64');
+  // POST /api/db/preferences — user-isolated
+  app.post("/api/db/preferences", async (req, res) => {
+    const email = (req as any).userEmail;
+    try {
+      const { nutritionPreferences } = req.body;
+      if (!nutritionPreferences) return res.status(400).json({ error: "Missing nutritionPreferences" });
 
-    const params = new URLSearchParams({
-      response_type: 'code',
-      client_id: (clientId as string) || WITHINGS_CLIENT_ID || '',
-      state: state,
-      scope: 'user.info,user.metrics,user.activity',
-      redirect_uri: redirectUri,
-    });
-    res.json({ url: `${WITHINGS_AUTH_URL}?${params.toString()}` });
-  });
+      const row = await readDb();
+      if (!row) return res.status(404).json({ error: "No DB found" });
 
-  app.get("/api/auth/withings/callback", async (req, res) => {
-    const { code, state } = req.query;
-    const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-    const redirectUri = `${appUrl.replace('http://', 'https://')}/api/auth/withings/callback`;
-
-    if (!code) {
-      return res.status(400).send("No code provided");
-    }
-
-    let clientId = WITHINGS_CLIENT_ID;
-    let clientSecret = WITHINGS_CLIENT_SECRET;
-
-    if (state) {
-      try {
-        const decoded = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
-        if (decoded.clientId) clientId = decoded.clientId;
-        if (decoded.clientSecret) clientSecret = decoded.clientSecret;
-      } catch (e) {
-        console.error("Failed to decode state:", e);
+      if (row.db[email]?.profile) {
+        const oldPrefs = row.db[email].profile.nutritionPreferences || {};
+        row.db[email].profile.nutritionPreferences = {
+          ...oldPrefs, ...nutritionPreferences,
+          preferredIngredients: nutritionPreferences.preferredIngredients?.length > 0 ? nutritionPreferences.preferredIngredients : (oldPrefs.preferredIngredients?.length > 0 ? oldPrefs.preferredIngredients : nutritionPreferences.preferredIngredients || []),
+          excludedIngredients: nutritionPreferences.excludedIngredients?.length > 0 ? nutritionPreferences.excludedIngredients : (oldPrefs.excludedIngredients?.length > 0 ? oldPrefs.excludedIngredients : nutritionPreferences.excludedIngredients || []),
+        };
+        await writeDb(row.id, row.db);
+        res.json({ status: "ok" });
+      } else {
+        res.status(404).json({ error: "User not found" });
       }
-    }
-
-    try {
-      const response = await axios.post(WITHINGS_TOKEN_URL, new URLSearchParams({
-        action: 'requesttoken',
-        grant_type: 'authorization_code',
-        client_id: clientId || '',
-        client_secret: clientSecret || '',
-        code: code as string,
-        redirect_uri: redirectUri,
-      }).toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      });
-
-      const tokens = response.data.body;
-
-      res.send(`
-        <html>
-          <body>
-            <script>
-              if (window.opener) {
-                window.opener.postMessage({ type: 'WITHINGS_AUTH_SUCCESS', tokens: ${JSON.stringify(tokens)} }, '*');
-                window.close();
-              } else {
-                window.location.href = '/';
-              }
-            </script>
-            <p>Authentication successful. This window should close automatically.</p>
-          </body>
-        </html>
-      `);
-    } catch (error: any) {
-      console.error("Withings Token Exchange Error:", error.response?.data || error.message);
-      res.status(500).send("Failed to exchange token with Withings");
+    } catch (error) {
+      console.error("Error saving preferences:", error);
+      res.status(500).json({ error: "Failed to save preferences" });
     }
   });
 
-  // Withings Data Proxy
-  app.post("/api/withings/fetch", async (req, res) => {
-    const { action, accessToken, params } = req.body;
+  // GET /api/admin/users — admin-only, returns all user profiles (no passwords, no health data)
+  app.get("/api/admin/users", async (req, res) => {
+    if (!(req as any).isAdmin) return res.status(403).json({ error: "Admin only" });
     try {
-      const response = await axios.post("https://wbsapi.withings.net/v2/measure", new URLSearchParams({
-        action,
-        access_token: accessToken,
-        ...params
-      }).toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      });
-      res.json(response.data);
-    } catch (error: any) {
-      console.error("Withings API Error:", error.response?.data || error.message);
-      res.status(500).json({ error: "Failed to fetch data from Withings" });
+      const row = await readDb();
+      if (!row) return res.json({});
+      // Return full DB for admin (strip passwords)
+      const safe: Record<string, any> = {};
+      for (const [key, userData] of Object.entries(row.db) as [string, any][]) {
+        if (userData?.profile) {
+          const { password: _pw, ...safeProfile } = userData.profile;
+          safe[key] = { ...userData, profile: safeProfile };
+        } else {
+          safe[key] = userData;
+        }
+      }
+      res.json(safe);
+    } catch (error) {
+      console.error("Error reading admin users:", error);
+      res.status(500).json({ error: "Failed" });
     }
   });
 
-  // Withings Token Refresh
-  app.post("/api/auth/withings/refresh", async (req, res) => {
-    const { refreshToken, clientId, clientSecret } = req.body;
+  // POST /api/admin/password — admin-only, set a user's password (hashed)
+  app.post("/api/admin/password", async (req, res) => {
+    if (!(req as any).isAdmin) return res.status(403).json({ error: "Admin only" });
+    const { email, password } = req.body;
+    if (!email || !password || password.length < 6) {
+      return res.status(400).json({ error: "Email and password (min 6 chars) required" });
+    }
     try {
-      const response = await axios.post(WITHINGS_TOKEN_URL, new URLSearchParams({
-        action: 'requesttoken',
-        grant_type: 'refresh_token',
-        client_id: clientId || WITHINGS_CLIENT_ID || '',
-        client_secret: clientSecret || WITHINGS_CLIENT_SECRET || '',
-        refresh_token: refreshToken,
-      }).toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      });
-      res.json(response.data.body);
-    } catch (error: any) {
-      console.error("Withings Refresh Error:", error.response?.data || error.message);
-      res.status(500).json({ error: "Failed to refresh Withings token" });
+      const row = await readDb();
+      if (!row || !row.db[email]) return res.status(404).json({ error: "User not found" });
+      row.db[email].profile.password = await bcrypt.hash(password, 12);
+      await writeDb(row.id, row.db);
+      res.json({ status: "ok" });
+    } catch (error) {
+      console.error("Admin password change error:", error);
+      res.status(500).json({ error: "Failed" });
     }
   });
 
-  // HealthBridge API Routes
+  // HealthBridge API Routes — with SSRF protection
   app.post("/api/healthbridge/login", async (req, res) => {
     const { baseUrl, username, password } = req.body;
+    if (!isAllowedHealthBridgeUrl(baseUrl)) {
+      return res.status(400).json({ error: "HealthBridge URL not allowed" });
+    }
     try {
       const response = await axios.post(`${baseUrl}/auth/login`, { username, password });
       res.json(response.data);
@@ -449,22 +697,17 @@ async function startServer() {
 
   app.post("/api/healthbridge/fetch", async (req, res) => {
     const { baseUrl, token, endpoint, params } = req.body;
+    if (!isAllowedHealthBridgeUrl(baseUrl)) {
+      return res.status(400).json({ error: "HealthBridge URL not allowed" });
+    }
     try {
-      // Normalize baseUrl: remove trailing slash and avoid double /api/v1
       let normalizedBase = baseUrl.replace(/\/$/, "");
       let targetEndpoint = endpoint;
-      
       if (normalizedBase.endsWith("/api/v1") && endpoint.startsWith("/api/v1")) {
         targetEndpoint = endpoint.replace("/api/v1", "");
       }
-
       const fullUrl = `${normalizedBase}${targetEndpoint}`;
-      console.log(`HealthBridge Proxy: GET ${fullUrl} with params:`, params);
-
-      const response = await axios.get(fullUrl, {
-        headers: { 'x-api-key': token },
-        params
-      });
+      const response = await axios.get(fullUrl, { headers: { 'x-api-key': token }, params });
       res.json(response.data);
     } catch (error: any) {
       console.error(`HealthBridge Fetch Error (${endpoint}):`, error.response?.data || error.message);

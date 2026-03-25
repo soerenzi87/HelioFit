@@ -22,6 +22,14 @@ export interface WeightEntry {
   weight: number;
 }
 
+export interface SegmentalData {
+  leftArm?: number;
+  rightArm?: number;
+  trunk?: number;
+  leftLeg?: number;
+  rightLeg?: number;
+}
+
 export interface HealthMetricEntry {
   date: string;
   // Activity
@@ -65,6 +73,9 @@ export interface HealthMetricEntry {
   healthScore?: number;
   waistHipRatio?: number;
   skeletalMuscleIndex?: number;
+  // Segmental body composition (per-limb from Xiaomi Scale)
+  segmentalFatKg?: SegmentalData;
+  segmentalMuscleKg?: SegmentalData;
   // Sleep
   sleepHours?: number;
   deepSleepMinutes?: number;
@@ -97,13 +108,57 @@ export interface HealthReadings {
   distance: { time: string; meters: number }[];
 }
 
+export type HealthDataSource = 'apple' | 'google' | 'xiaomiScale' | 'healthSync';
+
+export type HealthMetricPreferenceKey =
+  | 'steps'
+  | 'activeEnergy'
+  | 'distance'
+  | 'activityMinutes'
+  | 'restingHeartRate'
+  | 'hrv'
+  | 'bloodPressureSys'
+  | 'oxygenSaturation'
+  | 'respiratoryRate'
+  | 'bodyTemperature'
+  | 'weight'
+  | 'bodyFat'
+  | 'sleepHours';
+
+export type HealthSourcePreferences = Partial<Record<HealthMetricPreferenceKey, HealthDataSource>>;
+
+export const DEFAULT_HEALTH_SOURCE_PREFERENCES: Record<HealthMetricPreferenceKey, HealthDataSource> = {
+  steps: 'google',
+  activeEnergy: 'google',
+  distance: 'google',
+  activityMinutes: 'google',
+  restingHeartRate: 'healthSync',
+  hrv: 'healthSync',
+  bloodPressureSys: 'healthSync',
+  oxygenSaturation: 'healthSync',
+  respiratoryRate: 'healthSync',
+  bodyTemperature: 'healthSync',
+  weight: 'xiaomiScale',
+  bodyFat: 'xiaomiScale',
+  sleepHours: 'google',
+};
+
 export interface HealthData {
   metrics: HealthMetricEntry[];
   readings?: HealthReadings;
+  /** Per-source raw metric values keyed by date then source. For live source switching. */
+  rawMetrics?: Record<string, Partial<Record<HealthDataSource, Partial<HealthMetricEntry>>>>;
+  /** Per-source raw readings. For live source switching. */
+  rawReadings?: Partial<Record<HealthDataSource, HealthReadings>>;
   sources?: {
     appleFiles: string[];
     googleSynced: boolean;
+    xiaomiScaleSynced?: boolean;
+    healthSyncSynced?: boolean;
     lastSync?: string;
+    metricCoverage?: Partial<Record<HealthDataSource, HealthMetricPreferenceKey[]>>;
+    metricSources?: Record<string, Partial<Record<HealthMetricPreferenceKey, HealthDataSource>>>;
+    readingSources?: Partial<Record<keyof HealthReadings, HealthDataSource>>;
   };
 }
 
@@ -142,6 +197,9 @@ export interface ExerciseLog {
     weight: number;
     reps: number;
     skipped?: boolean;
+    done?: boolean;
+    weightText?: string;
+    repsText?: string;
   }[];
 }
 
@@ -149,12 +207,15 @@ export interface WorkoutLog {
   date: string;
   sessionTitle: string;
   exercises: ExerciseLog[];
+  durationMinutes?: number;
+  notes?: string;
 }
 
 export interface WorkoutSession {
   dayTitle: string;
   focus: string;
   duration: string;
+  warmup?: string[];
   exercises: Exercise[];
 }
 
@@ -165,18 +226,99 @@ export interface WorkoutProgram {
   description: string;
   sessions: WorkoutSession[];
   recoveryTips: string[];
+  cardioRecommendations?: string[];
 }
+
+export interface ManualWorkoutHistorySession {
+  approximateDate?: string;
+  title: string;
+  exercises: string[];
+  notes?: string;
+}
+
+export interface ManualWorkoutHistoryEntry {
+  date?: string;
+  sessionTitle?: string;
+  exercise: string;
+  weight?: string;
+  reps?: string;
+  sets?: string;
+  notes?: string;
+}
+
+export interface ManualWorkoutHistoryInterpretation {
+  summary: string;
+  inferredExperienceLevel: string;
+  estimatedWeeklyFrequency: string;
+  goalsDetected: string[];
+  focusAreas: string[];
+  limitations: string[];
+  parsedSessions: ManualWorkoutHistorySession[];
+  parsedEntries: ManualWorkoutHistoryEntry[];
+  recommendations: string[];
+}
+
+export type AIContextSize = 'small' | 'medium' | 'large';
+
+export const AI_CONTEXT_PRESETS: Record<AIContextSize, { healthDays: number; workoutWeeks: number; logLimit: number; topExercises: number }> = {
+  small:  { healthDays: 7,  workoutWeeks: 3,  logLimit: 6,  topExercises: 5  },
+  medium: { healthDays: 14, workoutWeeks: 6,  logLimit: 12, topExercises: 8  },
+  large:  { healthDays: 30, workoutWeeks: 10, logLimit: 20, topExercises: 12 },
+};
 
 export interface AIConfig {
   geminiKey?: string;
   openaiKey?: string;
   claudeKey?: string;
   preferredProvider?: 'gemini' | 'openai' | 'claude';
+  contextSize?: AIContextSize;
 }
 
-export interface WithingsConfig {
-  clientId: string;
-  clientSecret: string;
+// ── Aggregated data types for compact AI prompts ──────────────────────
+
+export interface AggregatedHealthSummary {
+  avgSteps: number;
+  avgSleep: number;
+  avgRestingHR: number;
+  avgHRV: number;
+  weightStart: number | null;
+  weightCurrent: number | null;
+  weightDelta: number | null;
+  avgBodyFat: number | null;
+  avgBloodGlucose: number | null;
+  avgBodyTemp: number | null;
+  avgSpo2: number | null;
+  avgBloodPressureSys: number | null;
+  avgBloodPressureDia: number | null;
+  periodDays: number;
+}
+
+export interface ExerciseProgressEntry {
+  name: string;
+  bestWeight: number;
+  lastWeight: number;
+  lastReps: string;
+  sessionCount: number;
+  trend: '↑' | '→' | '↓';
+}
+
+export interface AggregatedWorkoutSummary {
+  totalSessions: number;
+  periodWeeks: number;
+  avgVolumePerSession: number;
+  consistencyPct: number;
+  topExercises: ExerciseProgressEntry[];
+}
+
+export interface AggregatedProfileSummary {
+  name: string;
+  age: number;
+  weight: number;
+  height: number;
+  gender: string;
+  bodyFat?: number;
+  goals: string[];
+  activityLevel: string;
 }
 
 export interface HealthBridgeConfig {
@@ -205,23 +347,23 @@ export interface UserProfile {
   nutritionPreferences?: NutritionPreferences;
   workoutPreferences?: WorkoutPreferences;
   workoutHistory?: WorkoutProgram[];
+  manualWorkoutHistoryText?: string;
+  manualWorkoutHistoryInterpretation?: ManualWorkoutHistoryInterpretation;
   likedRecipes?: Recipe[];
   calorieAdjustment?: number;
-  withingsConfig?: WithingsConfig;
-  withingsTokens?: {
-    access_token: string;
-    refresh_token: string;
-    userid: string;
-    expires_in: number;
-    last_sync?: string;
-  };
   healthBridgeConfig?: HealthBridgeConfig;
   healthBridgeTokens?: {
     access_token: string;
     last_sync?: string;
+    scale_last_sync?: string;
+    health_sync_last_sync?: string;
   };
   aiConfig?: AIConfig;
   mockMode?: boolean;
+  healthSourcePreferences?: HealthSourcePreferences;
+  eatenMeals?: Record<string, string>; // key: "day|mealType", value: ISO timestamp
+  additionalFood?: Record<string, string>; // key: day name, value: free text of extra food eaten
+  nutritionHistory?: { plan: WeeklyMealPlan; completedAt: string; eatenMeals: Record<string, string>; additionalFood?: Record<string, any> }[];
 }
 
 export interface NutritionTargets {
@@ -245,6 +387,7 @@ export interface Recipe {
   requiredAppliances: string[];
   usageCount?: number;
   isPlannedForWeek?: boolean;
+  mealType?: 'breakfast' | 'lunch' | 'dinner' | 'snack';
 }
 
 export interface DailyMealPlan {

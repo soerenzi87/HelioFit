@@ -23,6 +23,14 @@ body {
   overflow-x: hidden;
 }
 
+/* Safe area helpers for notch / dynamic island devices */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 .glass-panel {
   background: rgba(30, 41, 59, 0.7);
   backdrop-filter: blur(12px);

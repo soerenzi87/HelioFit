@@ -1,4 +1,8 @@
-import { HealthData, HealthMetricEntry, HealthBridgeConfig, HealthReadings } from "../types";
+import { HealthData, HealthMetricEntry, HealthBridgeConfig, HealthReadings, HealthDataSource } from "../types";
+
+type HealthBridgeSyncResult = HealthData & {
+  sourcePayloads?: Partial<Record<Extract<HealthDataSource, 'xiaomiScale' | 'healthSync'>, HealthData>>;
+};
 
 /**
  * Validates the sync token against the server, then returns it.
@@ -16,26 +20,40 @@ export async function loginHealthBridge(config: HealthBridgeConfig): Promise<str
   return config.apiKey;
 }
 
-export async function fetchHealthBridgeData(config: HealthBridgeConfig, token: string): Promise<HealthData> {
-  const days = 365;
+export async function fetchHealthBridgeData(config: HealthBridgeConfig, token: string, lastSync?: string): Promise<HealthBridgeSyncResult> {
+  // Always fetch full history for scale data (small payload, prevents data loss)
+  // Only apply delta for high-frequency data (heart rate, steps, etc.)
+  let daysFull = 365; // for weight/scale data — always full to prevent data loss
+  let daysIncremental = 90; // for HR, steps, sleep, etc.
+  if (lastSync) {
+    const lastSyncDate = new Date(lastSync);
+    if (!isNaN(lastSyncDate.getTime())) {
+      const diffMs = Date.now() - lastSyncDate.getTime();
+      const diffDays = Math.ceil(diffMs / 86400000) + 1; // +1 day buffer
+      daysIncremental = Math.max(diffDays, 2); // at least 2 days
+    }
+  }
 
   // Token is the sync token - used directly in the URL path
   const basePath = `/hb/ingest/${token}`;
 
+  const d = daysIncremental;
   const endpoints = [
-    { key: 'weight', path: `${basePath}/weight`, params: { days } },
-    { key: 'heart_rate', path: `${basePath}/heart-rate`, params: { days } },
-    { key: 'hrv', path: `${basePath}/hrv`, params: { days } },
-    { key: 'blood_pressure', path: `${basePath}/blood-pressure`, params: { days } },
-    { key: 'spo2', path: `${basePath}/spo2`, params: { days } },
-    { key: 'steps', path: `${basePath}/steps`, params: { days } },
-    { key: 'calories', path: `${basePath}/calories`, params: { days } },
-    { key: 'distance', path: `${basePath}/distance`, params: { days } },
-    { key: 'sleep', path: `${basePath}/sleep`, params: { days } },
-    { key: 'respiratory_rate', path: `${basePath}/respiratory-rate`, params: { days } },
-    { key: 'body_temperature', path: `${basePath}/body-temperature`, params: { days } },
+    // Weight, scale & sleep data: ALWAYS full history (small payload, prevents data loss)
+    { key: 'weight', path: `${basePath}/weight`, params: { days: daysFull } },
+    { key: 'scale_history', path: `${basePath}/scale/history`, params: { days: daysFull } },
+    { key: 'sleep', path: `${basePath}/sleep`, params: { days: daysFull } },
+    // High-frequency data: incremental (large payloads)
+    { key: 'heart_rate', path: `${basePath}/heart-rate`, params: { days: d } },
+    { key: 'hrv', path: `${basePath}/hrv`, params: { days: d } },
+    { key: 'blood_pressure', path: `${basePath}/blood-pressure`, params: { days: d } },
+    { key: 'spo2', path: `${basePath}/spo2`, params: { days: d } },
+    { key: 'steps', path: `${basePath}/steps`, params: { days: d } },
+    { key: 'calories', path: `${basePath}/calories`, params: { days: d } },
+    { key: 'distance', path: `${basePath}/distance`, params: { days: d } },
+    { key: 'respiratory_rate', path: `${basePath}/respiratory-rate`, params: { days: d } },
+    { key: 'body_temperature', path: `${basePath}/body-temperature`, params: { days: d } },
     { key: 'latest', path: `${basePath}/latest`, params: {} },
-    { key: 'scale_history', path: `${basePath}/scale/history`, params: { days } },
   ];
 
   console.log(`Starting HealthBridge fetch for ${endpoints.length} endpoints...`);
@@ -173,8 +191,8 @@ export async function fetchHealthBridgeData(config: HealthBridgeConfig, token: s
 
         // Today's aggregates
         const todayEntry = ensureEntry(now);
-        if (latest.today_steps) todayEntry.steps = latest.today_steps;
-        if (latest.today_calories) todayEntry.activeEnergy = latest.today_calories;
+        if (latest.today_steps) todayEntry.steps = Number(latest.today_steps);
+        if (latest.today_calories) todayEntry.activeEnergy = Number(latest.today_calories);
       }
 
       return;
@@ -215,23 +233,29 @@ export async function fetchHealthBridgeData(config: HealthBridgeConfig, token: s
           ensureCollector(timestamp).spo2.push(rec.percentage);
           break;
         case 'steps':
-          entry.steps = (entry.steps || 0) + rec.count;
-          readings.steps.push({ time, count: rec.count });
+          entry.steps = (entry.steps || 0) + Number(rec.count);
+          readings.steps.push({ time, count: Number(rec.count) });
           break;
         case 'calories':
-          entry.activeEnergy = (entry.activeEnergy || 0) + rec.kilocalories;
-          readings.calories.push({ time, kilocalories: rec.kilocalories });
+          entry.activeEnergy = (entry.activeEnergy || 0) + Number(rec.kilocalories);
+          readings.calories.push({ time, kilocalories: Number(rec.kilocalories) });
           break;
         case 'distance':
-          entry.distance = (entry.distance || 0) + (rec.meters || 0);
-          readings.distance.push({ time, meters: rec.meters || 0 });
+          entry.distance = (entry.distance || 0) + (Number(rec.meters) || 0);
+          readings.distance.push({ time, meters: Number(rec.meters) || 0 });
           break;
-        case 'sleep':
-          entry.sleepHours = (entry.sleepHours || 0) + (rec.duration_minutes / 60);
-          if (rec.deep_sleep_minutes) entry.deepSleepMinutes = (entry.deepSleepMinutes || 0) + rec.deep_sleep_minutes;
-          if (rec.rem_sleep_minutes) entry.remSleepMinutes = (entry.remSleepMinutes || 0) + rec.rem_sleep_minutes;
-          if (rec.light_sleep_minutes) entry.lightSleepMinutes = (entry.lightSleepMinutes || 0) + rec.light_sleep_minutes;
+        case 'sleep': {
+          // Keep the longest session per day (avoid duplicates inflating totals)
+          const dur = Number(rec.duration_minutes);
+          const existingDur = (entry.sleepHours || 0) * 60;
+          if (dur > existingDur) {
+            entry.sleepHours = dur / 60;
+            entry.deepSleepMinutes = Number(rec.deep_sleep_minutes) || 0;
+            entry.remSleepMinutes = Number(rec.rem_sleep_minutes) || 0;
+            entry.lightSleepMinutes = Number(rec.light_sleep_minutes) || 0;
+          }
           break;
+        }
         case 'respiratory_rate':
           entry.respiratoryRate = rec.breaths_per_minute;
           readings.respiratoryRate.push({ time, value: rec.breaths_per_minute });
@@ -259,6 +283,12 @@ export async function fetchHealthBridgeData(config: HealthBridgeConfig, token: s
           if (rec.score) scaleEntry.healthScore = rec.score;
           if (rec.waist_hip_ratio) scaleEntry.waistHipRatio = rec.waist_hip_ratio;
           if (rec.skeletal_muscle_index) scaleEntry.skeletalMuscleIndex = rec.skeletal_muscle_index;
+          // Segmental body composition (per-limb data from Xiaomi Scale)
+          if (rec.segmental_data) {
+            const sd = rec.segmental_data;
+            if (sd.segmentalFatKg) scaleEntry.segmentalFatKg = sd.segmentalFatKg;
+            if (sd.segmentalMuscleKg) scaleEntry.segmentalMuscleKg = sd.segmentalMuscleKg;
+          }
           // Calculate lean body mass if we have weight and fat
           if (rec.weight_kg && rec.body_fat_pct) {
             scaleEntry.leanBodyMass = +(rec.weight_kg * (1 - rec.body_fat_pct / 100)).toFixed(1);
@@ -346,7 +376,96 @@ export async function fetchHealthBridgeData(config: HealthBridgeConfig, token: s
     new Date(a.date).getTime() - new Date(b.date).getTime()
   );
 
+  const xiaomiScaleMetrics = metrics
+    .map((entry) => ({
+      date: entry.date,
+      weight: entry.weight,
+      bmi: entry.bmi,
+      bodyFat: entry.bodyFat,
+      leanBodyMass: entry.leanBodyMass,
+      musclePct: entry.musclePct,
+      muscleMassKg: entry.muscleMassKg,
+      waterPct: entry.waterPct,
+      proteinPct: entry.proteinPct,
+      boneMassKg: entry.boneMassKg,
+      fatMassKg: entry.fatMassKg,
+      visceralFat: entry.visceralFat,
+      bmr: entry.bmr,
+      bodyAge: entry.bodyAge,
+      healthScore: entry.healthScore,
+      waistHipRatio: entry.waistHipRatio,
+      skeletalMuscleIndex: entry.skeletalMuscleIndex,
+      segmentalFatKg: entry.segmentalFatKg,
+      segmentalMuscleKg: entry.segmentalMuscleKg,
+    }))
+    .filter((entry) => Object.entries(entry).some(([key, value]) => key !== 'date' && value !== undefined && value !== null));
+
+  const healthSyncMetrics = metrics
+    .map((entry) => ({
+      date: entry.date,
+      steps: entry.steps,
+      activeEnergy: entry.activeEnergy,
+      activityMinutes: entry.activityMinutes,
+      distance: entry.distance,
+      restingHeartRate: entry.restingHeartRate,
+      heartRateMin: entry.heartRateMin,
+      heartRateMax: entry.heartRateMax,
+      heartRateCount: entry.heartRateCount,
+      hrv: entry.hrv,
+      hrvMin: entry.hrvMin,
+      hrvMax: entry.hrvMax,
+      hrvCount: entry.hrvCount,
+      bloodPressureSys: entry.bloodPressureSys,
+      bloodPressureDia: entry.bloodPressureDia,
+      oxygenSaturation: entry.oxygenSaturation,
+      spo2Min: entry.spo2Min,
+      spo2Max: entry.spo2Max,
+      spo2Count: entry.spo2Count,
+      respiratoryRate: entry.respiratoryRate,
+      bodyTemperature: entry.bodyTemperature,
+      sleepHours: entry.sleepHours,
+      deepSleepMinutes: entry.deepSleepMinutes,
+      remSleepMinutes: entry.remSleepMinutes,
+      lightSleepMinutes: entry.lightSleepMinutes,
+    }))
+    .filter((entry) => Object.entries(entry).some(([key, value]) => key !== 'date' && value !== undefined && value !== null));
+
   console.log(`HealthBridge data: ${metrics.length} daily entries, readings: HR=${readings.heartRate.length} HRV=${readings.hrv.length} SpO2=${readings.spo2.length} Steps=${readings.steps.length} Weight=${readings.weight.length}`);
 
-  return { metrics, readings };
+  return {
+    metrics,
+    readings,
+    sourcePayloads: {
+      xiaomiScale: {
+        metrics: xiaomiScaleMetrics,
+        readings: {
+          heartRate: [],
+          hrv: [],
+          spo2: [],
+          respiratoryRate: [],
+          bodyTemperature: [],
+          weight: readings.weight,
+          bloodPressure: [],
+          steps: [],
+          calories: [],
+          distance: [],
+        },
+      },
+      healthSync: {
+        metrics: healthSyncMetrics,
+        readings: {
+          heartRate: readings.heartRate,
+          hrv: readings.hrv,
+          spo2: readings.spo2,
+          respiratoryRate: readings.respiratoryRate,
+          bodyTemperature: readings.bodyTemperature,
+          weight: [],
+          bloodPressure: readings.bloodPressure,
+          steps: readings.steps,
+          calories: readings.calories,
+          distance: readings.distance,
+        },
+      },
+    },
+  };
 }

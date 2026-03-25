@@ -1,6 +1,7 @@
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { UserProfile, Language } from '../types';
+import { apiFetch } from '../services/apiFetch';
 
 interface AdminPanelProps {
   users: Record<string, { profile: UserProfile; logs?: any[]; health?: any[] }>;
@@ -10,7 +11,28 @@ interface AdminPanelProps {
   language: Language;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUser, onRenameUser, onDeleteUser, language }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ users: localUsers, onUpdateUser, onRenameUser, onDeleteUser, language }) => {
+  const [serverUsers, setServerUsers] = useState<Record<string, any> | null>(null);
+
+  // Fetch all users from server admin endpoint
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const res = await apiFetch('/api/admin/users');
+        if (res.ok) {
+          const data = await res.json();
+          setServerUsers(data);
+        }
+      } catch (e) {
+        console.error("Failed to fetch admin users", e);
+      }
+    };
+    fetchUsers();
+  }, [localUsers]); // Re-fetch when local changes trigger re-render
+
+  // Use server users if available, fall back to local
+  const users = serverUsers || localUsers;
+
   const t = language === 'de' ? {
     title: 'Benutzerverwaltung',
     email: 'Benutzer / E-Mail',
@@ -96,7 +118,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUser, onRenameUs
                 <td className="px-6 py-4">
                   {editingEmail === email ? (
                     <div className="flex items-center gap-2">
-                      <input 
+                      <input
                         value={tempEmail}
                         onChange={(e) => setTempEmail(e.target.value)}
                         className="px-2 py-1 bg-white border border-slate-200 rounded text-sm font-bold outline-none"
@@ -107,7 +129,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUser, onRenameUs
                   ) : (
                     <div className="flex items-center gap-2 group">
                       <span className="font-bold text-slate-900 text-sm whitespace-nowrap">{email}</span>
-                      <button 
+                      <button
                         onClick={() => { setEditingEmail(email); setTempEmail(email); }}
                         className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-indigo-600 transition-all p-1"
                       >
@@ -128,13 +150,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUser, onRenameUs
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden w-fit bg-slate-50">
-                    <button 
+                    <button
                       onClick={() => onUpdateUser(email, { mockMode: false })}
                       className={`px-3 py-1.5 text-[8px] font-black uppercase tracking-widest transition-all ${!data.profile.mockMode ? 'bg-indigo-600 text-white shadow-inner' : 'text-slate-400 hover:bg-white'}`}
                     >
                       {t.realData}
                     </button>
-                    <button 
+                    <button
                       onClick={() => onUpdateUser(email, { mockMode: true })}
                       className={`px-3 py-1.5 text-[8px] font-black uppercase tracking-widest transition-all ${data.profile.mockMode ? 'bg-indigo-600 text-white shadow-inner' : 'text-slate-400 hover:bg-white'}`}
                     >
@@ -144,30 +166,30 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUser, onRenameUs
                 </td>
                 <td className="px-6 py-4 text-right space-x-2">
                   {data.profile.isApproved === false ? (
-                    <button 
+                    <button
                       onClick={() => onUpdateUser(email, { isApproved: true })}
                       className="px-4 py-2 bg-green-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-green-700 transition-all shadow-lg"
                     >
                       {t.approve}
                     </button>
                   ) : (
-                    <button 
+                    <button
                       onClick={() => onUpdateUser(email, { isApproved: false })}
                       className="px-4 py-2 border border-slate-200 text-slate-400 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-red-50 hover:text-red-500 hover:border-red-100 transition-all"
                     >
                       {t.block}
                     </button>
                   )}
-                  
+
                   {data.profile.isAdmin ? (
-                    <button 
+                    <button
                       onClick={() => onUpdateUser(email, { isAdmin: false })}
                       className="px-4 py-2 border border-slate-200 text-slate-400 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-900 transition-all"
                     >
                       {t.removeAdmin}
                     </button>
                   ) : (
-                    <button 
+                    <button
                       onClick={() => onUpdateUser(email, { isAdmin: true })}
                       className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
                     >
@@ -175,12 +197,23 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUser, onRenameUs
                     </button>
                   )}
 
-                  <button 
-                    onClick={() => {
+                  <button
+                    onClick={async () => {
                       const pass = prompt(t.newPassword);
                       if (pass) {
-                        onUpdateUser(email, { password: pass });
-                        alert(t.passwordChanged);
+                        try {
+                          const res = await apiFetch('/api/admin/password', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ email, password: pass }),
+                          });
+                          if (res.ok) {
+                            alert(t.passwordChanged);
+                          } else {
+                            const data = await res.json();
+                            alert(data.error || 'Failed');
+                          }
+                        } catch { alert('Connection error'); }
                       }
                     }}
                     className="px-4 py-2 border border-slate-200 text-slate-400 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-900 transition-all"
@@ -189,7 +222,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUser, onRenameUs
                     <i className="fas fa-key"></i>
                   </button>
 
-                  <button 
+                  <button
                     onClick={() => {
                       if (window.confirm(t.confirmDelete)) {
                         onDeleteUser(email);
@@ -212,26 +245,37 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, onUpdateUser, onRenameUs
           <i className="fas fa-shield-halved"></i>
           {t.adminSecurity}
         </h3>
-        
+
         <div className="max-w-md bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
             {t.newPassword}
           </label>
           <div className="flex gap-3">
-            <input 
+            <input
               type="password"
               value={newPasswords['admin'] || ''}
               onChange={(e) => setNewPasswords(prev => ({ ...prev, admin: e.target.value }))}
               placeholder="••••••••"
               className="flex-grow px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none font-bold text-slate-900 text-sm transition-all"
             />
-            <button 
-              onClick={() => {
+            <button
+              onClick={async () => {
                 const pass = newPasswords['admin'];
                 if (pass) {
-                  onUpdateUser('admin@heliofit.ai', { password: pass });
-                  setNewPasswords(prev => ({ ...prev, admin: '' }));
-                  alert(t.passwordChanged);
+                  try {
+                    const res = await apiFetch('/api/admin/password', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ email: 'admin@heliofit.ai', password: pass }),
+                    });
+                    if (res.ok) {
+                      setNewPasswords(prev => ({ ...prev, admin: '' }));
+                      alert(t.passwordChanged);
+                    } else {
+                      const data = await res.json();
+                      alert(data.error || 'Failed');
+                    }
+                  } catch { alert('Connection error'); }
                 }
               }}
               className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg"

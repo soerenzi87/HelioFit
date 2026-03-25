@@ -84,10 +84,12 @@ def load_deploy_env() -> dict[str, str]:
     return config
 
 
-def run(cmd: str, *, check: bool = True, **kwargs):
+def run(cmd: str, *, check: bool = True, capture_output: bool = False, **kwargs):
     """Shell-Befehl ausfuehren mit huebscher Ausgabe."""
-    print(f"\n  \u2192 {cmd}")
-    return subprocess.run(cmd, shell=True, check=check, text=True, **kwargs)
+    if not capture_output:
+        print(f"\n  \u2192 {cmd}")
+    return subprocess.run(cmd, shell=True, check=check, text=True,
+                          capture_output=capture_output, **kwargs)
 
 
 def ssh(config: dict, remote_cmd: str, **kwargs):
@@ -139,6 +141,8 @@ def cmd_setup(config: dict):
             "DB_NAME=heliofit_db\n\n"
             "# HealthBridge API Key (zufaelligen Key generieren!)\n"
             "HB_API_KEY=AENDERN_ZufaelligerApiKey\n\n"
+            "# API Secret — schuetzt /api/* Endpoints vor unautorisiertem Zugriff\n"
+            "API_SECRET=AENDERN_ZufaelligesSecret\n\n"
             "# Firebase (optional - Pfad zum Service-Account JSON auf dem Server)\n"
             "FIREBASE_SA_PATH=\n\n"
             "# Gemini API Key (optional)\n"
@@ -167,8 +171,52 @@ def cmd_setup(config: dict):
     print("  4. python3 deploy.py")
 
 
+def cmd_cleanup(config: dict):
+    """Speicherplatz auf dem Server optimieren."""
+    require_host(config)
+    remote_path = config["DEPLOY_PATH"]
+
+    print("\n[Cleanup] Speicherplatz auf dem Server optimieren...")
+
+    # 1. Speicherplatz vorher anzeigen
+    print("\n  Speicherplatz vorher:")
+    ssh(config, "df -h / | tail -1")
+
+    # 2. Alte Docker-Images entfernen (dangling + ungenutzte)
+    print("\n  Alte Docker-Images und Build-Cache entfernen...")
+    ssh(config, "docker image prune -af --filter 'until=1h' 2>/dev/null; docker builder prune -af 2>/dev/null; true")
+
+    # 3. Gestoppte Container entfernen
+    print("\n  Gestoppte Container entfernen...")
+    ssh(config, "docker container prune -f 2>/dev/null; true")
+
+    # 4. Ungenutzte Volumes entfernen (NICHT das DB-Volume!)
+    print("\n  Ungenutzte Volumes entfernen...")
+    ssh(config, "docker volume prune -f 2>/dev/null; true")
+
+    # 5. Ungenutzte Netzwerke entfernen
+    ssh(config, "docker network prune -f 2>/dev/null; true")
+
+    # 6. apt/apk Cache leeren (je nach Distro)
+    print("\n  System-Cache leeren...")
+    ssh(config, "apt-get clean 2>/dev/null; rm -rf /var/cache/apt/archives/* 2>/dev/null; "
+                "apk cache clean 2>/dev/null; "
+                "rm -rf /tmp/* 2>/dev/null; "
+                "journalctl --vacuum-size=50M 2>/dev/null; true")
+
+    # 7. Alte Logfiles komprimieren/entfernen
+    print("\n  Alte Logs bereinigen...")
+    ssh(config, f"find /var/log -name '*.gz' -mtime +7 -delete 2>/dev/null; "
+                f"find /var/log -name '*.old' -delete 2>/dev/null; "
+                f"find /var/log -name '*.1' -delete 2>/dev/null; true")
+
+    # 8. Speicherplatz nachher anzeigen
+    print("\n  Speicherplatz nachher:")
+    ssh(config, "df -h / | tail -1")
+
+
 def cmd_deploy(config: dict, quick: bool = False):
-    """Deployment: Sync \u2192 Build \u2192 Start."""
+    """Deployment: Cleanup \u2192 Sync \u2192 Build \u2192 Start."""
 
     host = require_host(config)
     remote_path = config["DEPLOY_PATH"]
@@ -176,8 +224,28 @@ def cmd_deploy(config: dict, quick: bool = False):
     user_host = f"{config['DEPLOY_USER']}@{config['DEPLOY_HOST']}"
 
     if not quick:
+        # ── Schritt 0: Speicherplatz optimieren ──
+        print("\n[0/5] Speicherplatz optimieren...")
+        # Speicherplatz pruefen — automatisch aufraeumen wenn < 500 MB frei
+        result = ssh(config, "df --output=avail / | tail -1", capture_output=True, check=False)
+        avail_kb = 0
+        if result and result.stdout:
+            try:
+                avail_kb = int(result.stdout.strip())
+            except ValueError:
+                pass
+        avail_mb = avail_kb // 1024
+
+        if avail_mb < 500:
+            print(f"  \u26a0 Nur {avail_mb} MB frei — raeume auf...")
+            cmd_cleanup(config)
+        else:
+            # Immer mindestens alte Docker-Images + Build-Cache aufraeumen
+            print(f"  {avail_mb} MB frei — schnelle Bereinigung alter Docker-Artefakte...")
+            ssh(config, "docker image prune -f 2>/dev/null; docker builder prune -af --filter 'until=1h' 2>/dev/null; true")
+
         # ── Schritt 1: Quellcode per tar+ssh uebertragen ──
-        print("\n[1/4] Quellcode auf Server uebertragen...")
+        print("\n[1/5] Quellcode auf Server uebertragen...")
 
         # Remote-Verzeichnis vorbereiten
         ssh(config, f"mkdir -p {remote_path}/src")
@@ -210,20 +278,25 @@ def cmd_deploy(config: dict, quick: bool = False):
             run(f'scp -P {port} "{firebase_sa}" {user_host}:{remote_path}/firebase-sa.json')
 
         # ── Schritt 2: Docker-Image auf dem Server bauen ──
-        print("\n[2/4] Docker-Image auf Server bauen...")
+        print("\n[2/5] Docker-Image auf Server bauen...")
         ssh(config, f"cd {remote_path}/src && docker build -f Dockerfile.prod -t {IMAGE_NAME}:latest .")
 
-        # ── Schritt 3: Alte Container stoppen ──
-        print("\n[3/4] Container neu starten...")
+        # ── Schritt 3: Alte Container stoppen + neu starten ──
+        print("\n[3/5] Container neu starten...")
         ssh(config, f"cd {remote_path} && docker compose down 2>/dev/null; docker compose up -d")
+
+        # ── Schritt 4: Post-Build Cleanup (altes Image entfernen) ──
+        print("\n[4/5] Post-Build Cleanup...")
+        ssh(config, "docker image prune -f 2>/dev/null; true")
 
     else:
         print("\n  --quick: Nur Container neu starten...")
         ssh(config, f"cd {remote_path} && docker compose down 2>/dev/null; docker compose up -d")
 
-    # ── Schritt 4: Status pruefen ──
-    print("\n[4/4] Status:")
+    # ── Schritt 5: Status pruefen ──
+    print("\n[5/5] Status:")
     ssh(config, f"cd {remote_path} && docker compose ps")
+    ssh(config, "df -h / | tail -1")
 
     print(f"\n  Deployment abgeschlossen!")
     print(f"  App erreichbar unter: http://{host}:8000")
@@ -267,8 +340,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Befehle:
-  (kein Argument)   Vollstaendiges Deployment (Sync + Build + Start)
+  (kein Argument)   Vollstaendiges Deployment (Cleanup + Sync + Build + Start)
   setup             Erstmalige Einrichtung
+  cleanup           Nur Speicherplatz auf dem Server optimieren
   status            Container-Status anzeigen
   logs              Logs anzeigen (--follow fuer live)
   stop              Container stoppen
@@ -276,7 +350,7 @@ Befehle:
         """,
     )
     parser.add_argument("command", nargs="?", default="deploy",
-                        choices=["deploy", "setup", "status", "logs", "stop"])
+                        choices=["deploy", "setup", "cleanup", "status", "logs", "stop"])
     parser.add_argument("--quick", action="store_true",
                         help="Nur Container neu starten, kein Build")
     parser.add_argument("--follow", "-f", action="store_true",
@@ -292,6 +366,8 @@ Befehle:
         cmd_setup(config)
     elif args.command == "deploy":
         cmd_deploy(config, quick=args.quick)
+    elif args.command == "cleanup":
+        cmd_cleanup(config)
     elif args.command == "logs":
         cmd_logs(config, follow=args.follow)
     elif args.command == "status":

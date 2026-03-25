@@ -4,7 +4,7 @@ import { initGoogleLogin, renderGoogleButton } from '../services/authService';
 import { Language } from '../types';
 
 interface AuthPortalProps {
-  onLogin: (user: { email: string; name: string; isGoogle: boolean; password?: string }) => void;
+  onLogin: (user: { email: string; name: string; isGoogle: boolean; password?: string }) => void | Promise<void>;
   onRegister: () => void;
   language: Language;
   isApprovalPending?: boolean;
@@ -17,6 +17,7 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
     if (isApprovalPending) {
@@ -26,8 +27,9 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
 
   useEffect(() => {
     if (view === 'initial' || view === 'email-login') {
-      initGoogleLogin((user) => {
-        onLogin({ ...user, isGoogle: true });
+      initGoogleLogin(async (user) => {
+        setIsLoggingIn(true);
+        try { await onLogin({ ...user, isGoogle: true }); } finally { setIsLoggingIn(false); }
       });
       renderGoogleButton('google-signin-btn');
     }
@@ -40,6 +42,7 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
     googleBtn: 'Mit Google anmelden',
     emailBtn: 'Mit E-Mail anmelden',
     registerBtn: 'Neues Konto erstellen',
+    or: 'ODER',
     backBtn: 'Zurück',
     loginBtn: 'Anmelden',
     emailPlaceholder: 'E-Mail Adresse',
@@ -48,6 +51,10 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
     pendingTitle: 'Konto wartet auf Freigabe',
     pendingMsg: 'Dein Konto wurde erfolgreich erstellt. Ein Administrator muss dich nun freischalten, bevor du die App nutzen kannst.',
     pendingBack: 'Zurück zur Anmeldung',
+    securityEncryption: 'Ende-zu-Ende-Verschlüsselung',
+    securityIdentity: 'Sichere Identität',
+    securityAi: 'Helio KI-gestützt',
+    securityProtocol: 'Sicheres Helio Cloud-Protokoll',
   } : {
     title: 'HelioFit AI',
     sub: 'Intelligent Performance Analysis',
@@ -55,6 +62,7 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
     googleBtn: 'Sign in with Google',
     emailBtn: 'Sign in with Email',
     registerBtn: 'Create new account',
+    or: 'OR',
     backBtn: 'Back',
     loginBtn: 'Sign In',
     emailPlaceholder: 'Email Address',
@@ -63,12 +71,17 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
     pendingTitle: 'Account Pending Approval',
     pendingMsg: 'Your account has been created. An administrator must approve your account before you can use the app.',
     pendingBack: 'Back to Login',
+    securityEncryption: 'End-to-End Encryption',
+    securityIdentity: 'Secure Identity',
+    securityAi: 'Helio AI Powered',
+    securityProtocol: 'Secure Helio Cloud Protocol',
   };
 
-  const handleEmailLogin = (e: React.FormEvent) => {
+  const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (email && password) {
-      onLogin({ email, name: email.split('@')[0], isGoogle: false, password });
+      setIsLoggingIn(true);
+      try { await onLogin({ email, name: email.split('@')[0], isGoogle: false, password }); } finally { setIsLoggingIn(false); }
     } else {
       setError(t.error);
     }
@@ -113,7 +126,7 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
               
               <div className="flex items-center gap-6 py-4 px-6">
                 <div className="flex-grow h-[1px] bg-white/5"></div>
-                <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest leading-none">OR</span>
+                <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest leading-none">{t.or}</span>
                 <div className="flex-grow h-[1px] bg-white/5"></div>
               </div>
 
@@ -213,11 +226,11 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
 
           <div className="mt-14 pt-10 border-t border-white/5 text-center">
             <div className="flex justify-center gap-10 text-slate-700 text-lg mb-6">
-              <i className="fas fa-shield-halved hover:text-indigo-500 transition-colors cursor-help" title="End-to-End Encryption"></i>
-              <i className="fas fa-fingerprint hover:text-indigo-500 transition-colors cursor-help" title="Secure Identity"></i>
-              <i className="fas fa-microchip hover:text-indigo-500 transition-colors cursor-help" title="Helio AI Powered"></i>
+              <i className="fas fa-shield-halved hover:text-indigo-500 transition-colors cursor-help" title={t.securityEncryption}></i>
+              <i className="fas fa-fingerprint hover:text-indigo-500 transition-colors cursor-help" title={t.securityIdentity}></i>
+              <i className="fas fa-microchip hover:text-indigo-500 transition-colors cursor-help" title={t.securityAi}></i>
             </div>
-            <p className="text-[9px] text-slate-700 font-black uppercase tracking-[0.5em]">Secure Helio Cloud Protocol</p>
+            <p className="text-[9px] text-slate-700 font-black uppercase tracking-[0.5em]">{t.securityProtocol}</p>
           </div>
         </div>
       </div>
