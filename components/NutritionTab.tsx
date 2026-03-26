@@ -164,6 +164,16 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
     }
   }, [profile?.additionalFood]);
 
+  // Sync replacedMeals from profile
+  useEffect(() => {
+    if (profile?.replacedMeals) {
+      setReplacedMeals(prev => {
+        const incoming = profile.replacedMeals!;
+        return JSON.stringify(prev) !== JSON.stringify(incoming) ? incoming : prev;
+      });
+    }
+  }, [profile?.replacedMeals]);
+
   // Pre-fill input from saved data when switching days
   useEffect(() => {
     setAdditionalFoodInput(additionalFood[selectedDay]?.text || '');
@@ -189,21 +199,93 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
     }
   };
 
+  // Track which meals were replaced by the AI chat (day|mealType -> old recipe)
+  const [replacedMeals, setReplacedMeals] = useState<Record<string, Recipe>>(() => {
+    return profile?.replacedMeals || {};
+  });
+
   const acceptAdditionalFoodDraft = () => {
     if (!additionalFoodDraft) return;
     const { day, estimate } = additionalFoodDraft;
-    // Save the additional food with estimate
-    const next = { ...additionalFood, [day]: { text: additionalFoodInput, estimate } };
-    setAdditionalFood(next);
-    if (profile) {
-      onUpdateProfile({ ...profile, additionalFood: next });
-    }
-    // Apply adjusted meals to plan if any
-    if (estimate.adjustedMeals && weeklyPlan?.[day]) {
-      const updatedDay = { ...weeklyPlan[day], ...estimate.adjustedMeals };
+
+    const hasAdjustedMeals = estimate.adjustedMeals && Object.keys(estimate.adjustedMeals).length > 0;
+
+    if (hasAdjustedMeals && weeklyPlan?.[day]) {
+      // ── REPLAN MODE: AI adjusted existing meals + added new food as a meal ──
+      const currentDay = weeklyPlan[day];
+      const updatedDay = { ...currentDay };
+      const newReplaced = { ...replacedMeals };
+
+      // Find which meal slot the new food should go into
+      // Use the first item's type hint, or infer from context
+      const newFoodItem = estimate.items[0];
+      let targetSlot: string | null = null;
+
+      // Check if any adjusted meal has a DIFFERENT name than the current plan → that slot was changed
+      for (const [mealType, adjustedMeal] of Object.entries(estimate.adjustedMeals) as [string, any][]) {
+        if (!adjustedMeal) continue;
+        const currentMeal = currentDay[mealType as keyof DailyMealPlan] as Recipe | undefined;
+        if (currentMeal && currentMeal.name !== adjustedMeal.name) {
+          // This meal was changed → save old as replaced, put new in plan
+          newReplaced[`${day}|${mealType}`] = currentMeal;
+        }
+        // Apply the adjusted meal to the plan
+        (updatedDay as any)[mealType] = adjustedMeal;
+      }
+
+      // Put the additional food item into the plan as a meal
+      // Find the best slot: prefer dinner for evening food, or the slot most closely matching
+      const mealSlotPriority = ['dinner', 'lunch', 'snack', 'breakfast'];
+      for (const slot of mealSlotPriority) {
+        const currentMeal = currentDay[slot as keyof DailyMealPlan] as Recipe | undefined;
+        // If the slot's current meal was NOT in adjustedMeals, it's a candidate for the new food
+        if (currentMeal && !(estimate.adjustedMeals as any)[slot]) {
+          targetSlot = slot;
+          break;
+        }
+      }
+
+      if (targetSlot && newFoodItem) {
+        const currentMeal = currentDay[targetSlot as keyof DailyMealPlan] as Recipe | undefined;
+        if (currentMeal) {
+          newReplaced[`${day}|${targetSlot}`] = currentMeal;
+        }
+        (updatedDay as any)[targetSlot] = {
+          name: newFoodItem.name,
+          ingredients: [],
+          instructions: [],
+          calories: newFoodItem.calories,
+          protein: newFoodItem.protein,
+          carbs: newFoodItem.carbs,
+          fats: newFoodItem.fats,
+          prepTime: '-',
+          requiredAppliances: [],
+        } as Recipe;
+      }
+
+      setReplacedMeals(newReplaced);
       onUpdateWeeklyPlan(day, updatedDay);
+
+      // Clear eaten status for replaced slots & persist replacedMeals
+      const eatenNext = { ...eatenMeals };
+      for (const key of Object.keys(newReplaced)) {
+        if (key.startsWith(`${day}|`) && eatenNext[key]) {
+          delete eatenNext[key];
+        }
+      }
+      setEatenMeals(eatenNext);
+      if (profile) onUpdateProfile({ ...profile, eatenMeals: eatenNext, replacedMeals: newReplaced });
+    } else {
+      // ── ADD MODE: Just extra food, no meal replacements ──
+      const next = { ...additionalFood, [day]: { text: additionalFoodInput, estimate } };
+      setAdditionalFood(next);
+      if (profile) {
+        onUpdateProfile({ ...profile, additionalFood: next });
+      }
     }
+
     setAdditionalFoodDraft(null);
+    setAdditionalFoodInput('');
   };
 
   const discardAdditionalFoodDraft = () => {
@@ -243,6 +325,14 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
     if (!currentDay) return;
     const updatedDay = { ...currentDay, [draftMeal.mealType]: draftMeal.recipe };
     onUpdateWeeklyPlan(draftMeal.day, updatedDay);
+    // Reset eaten status for this slot since it's a new recipe
+    const key = `${draftMeal.day}|${draftMeal.mealType}`;
+    setEatenMeals(prev => {
+      const next = { ...prev };
+      delete next[key];
+      if (profile) onUpdateProfile({ ...profile, eatenMeals: next });
+      return next;
+    });
     setDraftMeal(null);
   };
 
@@ -929,10 +1019,11 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
                   if (!meal) return null;
                   const isLiked = profile?.likedRecipes?.some(r => r.name === meal.name);
                   const eaten = isMealEaten(selectedDay, type);
+                  const isBeingReplaced = draftMeal?.day === selectedDay && draftMeal?.mealType === type;
                   return (
                     <div
                       key={type}
-                      className={`bg-[#1a1f26] p-6 rounded-[2.5rem] border hover:shadow-2xl transition-all relative group overflow-hidden cursor-pointer ${eaten ? 'border-emerald-500/30 bg-emerald-950/20' : 'border-white/5 hover:bg-slate-800/50 hover:border-white/10'}`}
+                      className={`bg-[#1a1f26] p-6 rounded-[2.5rem] border hover:shadow-2xl transition-all relative group overflow-hidden cursor-pointer ${isBeingReplaced ? 'border-amber-500/30 bg-amber-950/10 opacity-60' : eaten ? 'border-emerald-500/30 bg-emerald-950/20' : 'border-white/5 hover:bg-slate-800/50 hover:border-white/10'}`}
                       onClick={() => setSelectedRecipe(meal)}
                     >
                       {/* Header: icon + type + action buttons */}
@@ -963,7 +1054,14 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
                         </div>
                       </div>
                       {/* Meal name */}
-                      <h4 className={`font-black text-sm leading-snug transition-colors line-clamp-2 mb-4 ${eaten ? 'text-emerald-300/80' : 'text-white group-hover:text-orange-400'}`}>{meal.name}</h4>
+                      {isBeingReplaced && (
+                        <div className="mb-2 flex items-center gap-2">
+                          <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/30 rounded-lg text-[8px] font-black uppercase tracking-widest text-amber-400">
+                            <i className="fas fa-arrow-right-arrow-left mr-1"></i>{language === 'de' ? 'Wird ersetzt' : 'Being replaced'}
+                          </span>
+                        </div>
+                      )}
+                      <h4 className={`font-black text-sm leading-snug transition-colors line-clamp-2 mb-4 ${isBeingReplaced ? 'line-through text-slate-500' : eaten ? 'text-emerald-300/80' : 'text-white group-hover:text-orange-400'}`}>{meal.name}</h4>
                       <div className="flex justify-between items-center text-[10px] font-black tracking-widest uppercase border-t border-white/5 pt-4">
                         <span className={eaten ? 'text-emerald-500/60' : 'text-slate-500'}>{Math.round(meal.calories)} kcal</span>
                         <span className={`flex items-center gap-1.5 ${eaten ? 'text-emerald-500/60' : 'text-orange-500'}`}><i className="fas fa-dumbbell text-[8px]"></i> {Math.round(meal.protein)}g P</span>
@@ -1005,6 +1103,54 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
                 })}
               </div>
 
+              {/* ── Replaced meals (greyed out old meals) ── */}
+              {(() => {
+                const dayReplaced = (Object.entries(replacedMeals) as [string, Recipe][]).filter(([key]) => key.startsWith(`${selectedDay}|`));
+                if (dayReplaced.length === 0) return null;
+                return (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                      <i className="fas fa-arrow-right-arrow-left text-slate-600"></i>
+                      {language === 'de' ? 'Ersetzte Mahlzeiten (vorher)' : 'Replaced meals (before)'}
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {dayReplaced.map(([key, oldMeal]) => {
+                        const mealType = key.split('|')[1];
+                        return (
+                          <div key={key} className="bg-[#1a1f26] p-4 rounded-2xl border border-white/5 opacity-40 relative">
+                            <div className="absolute top-3 right-3">
+                              <button
+                                onClick={() => {
+                                  // Undo: restore old meal and remove from replacedMeals
+                                  if (weeklyPlan?.[selectedDay]) {
+                                    const restored = { ...weeklyPlan[selectedDay], [mealType]: oldMeal };
+                                    onUpdateWeeklyPlan(selectedDay, restored);
+                                    const nextReplaced = { ...replacedMeals };
+                                    delete nextReplaced[key];
+                                    setReplacedMeals(nextReplaced);
+                                    if (profile) onUpdateProfile({ ...profile, replacedMeals: nextReplaced });
+                                  }
+                                }}
+                                className="w-7 h-7 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-slate-500 hover:text-amber-400 hover:border-amber-500/20 transition-all"
+                                title={language === 'de' ? 'Wiederherstellen' : 'Restore'}
+                              >
+                                <i className="fas fa-undo text-[9px]"></i>
+                              </button>
+                            </div>
+                            <p className="text-[8px] font-black uppercase text-slate-600 tracking-widest mb-1">{mealType}</p>
+                            <h4 className="font-black text-sm text-slate-500 line-through leading-snug mb-2">{oldMeal.name}</h4>
+                            <div className="flex gap-3 text-[9px] font-black text-slate-600">
+                              <span>{Math.round(oldMeal.calories)} kcal</span>
+                              <span>{Math.round(oldMeal.protein)}g P</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* ── Additional Food Log (AI-powered, per day) ── */}
               <div className="mt-6 bg-[#1a1f26] p-5 sm:p-6 rounded-[2rem] border border-white/5">
                 <div className="flex items-center gap-3 mb-3">
@@ -1013,10 +1159,10 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
                   </div>
                   <div className="flex-1">
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                      {language === 'de' ? 'Ungeplantes Essen' : 'Unplanned Food'}
+                      {language === 'de' ? 'KI-Planer' : 'AI Planner'}
                     </p>
                     <p className="text-[8px] font-bold text-slate-600 tracking-wide">
-                      {language === 'de' ? 'KI schätzt Nährwerte & passt restliche Mahlzeiten an' : 'AI estimates nutrition & adjusts remaining meals'}
+                      {language === 'de' ? 'Umplanen, hinzufügen oder anpassen per Chat' : 'Replan, add or adjust meals via chat'}
                     </p>
                   </div>
                 </div>
@@ -1068,8 +1214,8 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
                       value={additionalFoodInput}
                       onChange={e => setAdditionalFoodInput(e.target.value)}
                       placeholder={language === 'de'
-                        ? 'z.B. Abendessen mit Freunden: Pizza Margherita, 2 Bier, Tiramisu...'
-                        : 'e.g. Dinner with friends: Margherita pizza, 2 beers, tiramisu...'}
+                        ? 'z.B. "Abends Flammkuchen mit Freunden, plane den Tag" oder "Ich hatte ein Eis extra"...'
+                        : 'e.g. "Having pizza tonight, replan the day" or "I had an extra ice cream"...'}
                       className="w-full px-4 py-3 bg-slate-800/40 border border-white/5 rounded-xl text-sm text-white placeholder:text-slate-600 outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500/20 resize-none font-medium transition-all"
                       rows={2}
                     />
@@ -1080,9 +1226,9 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
                         className="w-full py-3 bg-violet-600 hover:bg-violet-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg shadow-violet-600/20"
                       >
                         {isEstimatingFood ? (
-                          <><i className="fas fa-spinner fa-spin text-xs"></i> {language === 'de' ? 'KI schätzt...' : 'AI estimating...'}</>
+                          <><i className="fas fa-spinner fa-spin text-xs"></i> {language === 'de' ? 'KI plant...' : 'AI planning...'}</>
                         ) : (
-                          <><i className="fas fa-bolt text-xs"></i> {language === 'de' ? 'Nährwerte schätzen & Plan anpassen' : 'Estimate nutrition & adjust plan'}</>
+                          <><i className="fas fa-bolt text-xs"></i> {language === 'de' ? 'Mit KI anpassen' : 'Adjust with AI'}</>
                         )}
                       </button>
                     )}
@@ -1128,22 +1274,35 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
                       ))}
                     </div>
 
-                    {/* Adjusted meals preview */}
+                    {/* Adjusted meals preview — show old vs new */}
                     {additionalFoodDraft.estimate.adjustedMeals && Object.keys(additionalFoodDraft.estimate.adjustedMeals).length > 0 && (
                       <div className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-xl">
                         <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-3">
                           <i className="fas fa-arrows-rotate mr-1.5"></i>
-                          {language === 'de' ? 'Angepasste Mahlzeiten' : 'Adjusted Meals'}
+                          {language === 'de' ? 'Angepasste Mahlzeiten (vorher → nachher)' : 'Adjusted Meals (before → after)'}
                         </p>
-                        {Object.entries(additionalFoodDraft.estimate.adjustedMeals).map(([mealType, meal]: [string, any]) => meal && (
-                          <div key={mealType} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest w-16">{mealType}</span>
-                              <span className="text-sm font-bold text-white">{meal.name}</span>
+                        {Object.entries(additionalFoodDraft.estimate.adjustedMeals).map(([mealType, meal]: [string, any]) => {
+                          if (!meal) return null;
+                          const currentMeal = weeklyPlan?.[selectedDay]?.[mealType as keyof DailyMealPlan] as Recipe | undefined;
+                          const isChanged = currentMeal && currentMeal.name !== meal.name;
+                          return (
+                            <div key={mealType} className="py-2 border-b border-white/5 last:border-0">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest w-16">{mealType}</span>
+                                {isChanged && currentMeal && (
+                                  <span className="text-xs text-slate-500 line-through">{currentMeal.name}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center justify-between ml-[4.5rem]">
+                                <span className="text-sm font-bold text-white flex items-center gap-2">
+                                  {isChanged && <i className="fas fa-arrow-right text-indigo-400 text-[8px]"></i>}
+                                  {meal.name}
+                                </span>
+                                <span className="text-[10px] font-black text-slate-400">{Math.round(meal.calories)} kcal</span>
+                              </div>
                             </div>
-                            <span className="text-[10px] font-black text-slate-400">{Math.round(meal.calories)} kcal</span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
 

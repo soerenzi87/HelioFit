@@ -686,7 +686,7 @@ const App: React.FC = () => {
     // Archive the nutrition plan in history
     const entry = { plan: weeklyPlan, completedAt: new Date().toISOString(), eatenMeals: profile.eatenMeals || {}, additionalFood: profile.additionalFood || {} };
     const nutritionHistory = profile.nutritionHistory ? [...profile.nutritionHistory, entry] : [entry];
-    const updatedProfile = { ...profile, nutritionHistory, eatenMeals: {}, additionalFood: {} };
+    const updatedProfile = { ...profile, nutritionHistory, eatenMeals: {}, additionalFood: {}, replacedMeals: {} };
 
     setWeeklyPlan(null);
     setProfile(updatedProfile);
@@ -1179,7 +1179,7 @@ const App: React.FC = () => {
                               return r;
                             });
 
-                            const updatedProfile = { ...profileWithPrefs, likedRecipes: updatedLikedRecipes, eatenMeals: {}, additionalFood: {} };
+                            const updatedProfile = { ...profileWithPrefs, likedRecipes: updatedLikedRecipes, eatenMeals: {}, additionalFood: {}, replacedMeals: {} };
                             setProfile(updatedProfile);
                             setDb(prev => ({
                               ...prev,
@@ -1190,7 +1190,7 @@ const App: React.FC = () => {
                               }
                             }));
                           } else {
-                            const clearedProfile = { ...profileWithPrefs, eatenMeals: {}, additionalFood: {} };
+                            const clearedProfile = { ...profileWithPrefs, eatenMeals: {}, additionalFood: {}, replacedMeals: {} };
                             setProfile(clearedProfile);
                             setDb(prev => ({...prev, [dbKey]: {...prev[dbKey], weeklyPlan: pl, profile: clearedProfile}}));
                           }

@@ -460,7 +460,7 @@ ${plannedRecipes.map(r => `- Slot "${r.mealType || 'dinner'}": "${r.name}"`).joi
 Generiere für die ANDEREN Slots (${['breakfast', 'lunch', 'dinner', 'snack'].filter(s => !slotsToSkip.includes(s)).join(', ')}) besonders abwechslungsreiche Rezepte.`
     : '';
 
-  const modBlock = modification ? `\n\n🔧 NUTZER-ANPASSUNG (höchste Priorität!): ${modification}\nPasse den gesamten Plan entsprechend dieser Anweisung an.` : '';
+  const modBlock = modification ? `\n\n🔧 NUTZER-ANPASSUNG: ${modification}\nPasse den gesamten Plan entsprechend dieser Anweisung an. ABER: Die oben genannten VERBOTENEN ZUTATEN haben IMMER Vorrang — verwende NIEMALS verbotene Zutaten, auch nicht bei Anpassungswünschen!` : '';
 
   const prompt = `Erstelle genau ${numTemplates} verschiedene Tages-Templates für einen Ernährungsplan.
 ZIELE PRO TAG: Kalorien: ${targets.calories}, Makros: ${targets.protein}g P, ${targets.carbs}g C, ${targets.fats}g F.
@@ -565,21 +565,20 @@ ${getLangInstruction(lang)}`;
 
         const replacements = JSON.parse(extractJson(replResponse.text));
 
-        // Apply replacements
+        // Apply replacements — always fall back if replacement also violates
         violations.forEach((v, i) => {
           if (replacements[i] && !mealViolatesExclusions(replacements[i])) {
             (finalWeeklyPlan[v.day] as any)[v.slot] = replacements[i];
-          } else if (replacements[i]) {
-            // Replacement ALSO violates — use a safe generic fallback
-            console.warn(`[MealPlan] Replacement for ${v.day}/${v.slot} also violates exclusions, using fallback`);
-            (finalWeeklyPlan[v.day] as any)[v.slot] = createSafeFallback(v.slot, targets, preferences.preferredIngredients);
+          } else {
+            console.warn(`[MealPlan] Replacement for ${v.day}/${v.slot} missing or also violates exclusions, using fallback`);
+            (finalWeeklyPlan[v.day] as any)[v.slot] = createSafeFallback(v.slot, targets, preferences.preferredIngredients, expandedExclusions);
           }
         });
       } catch (e) {
         console.error('[MealPlan] Failed to generate replacements, using fallbacks', e);
         // Use safe generic fallbacks for all violations
         violations.forEach(v => {
-          (finalWeeklyPlan[v.day] as any)[v.slot] = createSafeFallback(v.slot, targets, preferences.preferredIngredients);
+          (finalWeeklyPlan[v.day] as any)[v.slot] = createSafeFallback(v.slot, targets, preferences.preferredIngredients, expandedExclusions);
         });
       }
     }
@@ -589,20 +588,46 @@ ${getLangInstruction(lang)}`;
 };
 
 // Safe fallback meals that cannot contain excluded ingredients
-function createSafeFallback(slot: string, targets: any, preferred: string[]): any {
+function createSafeFallback(slot: string, targets: any, preferred: string[], exclusions: string[] = []): any {
   const cal = Math.round((targets?.calories || 2000) / 4);
   const p = Math.round((targets?.protein || 150) / 4);
   const c = Math.round((targets?.carbs || 200) / 4);
   const f = Math.round((targets?.fats || 60) / 4);
   const usePref = preferred.length > 0 ? preferred[0] : 'Hähnchenbrust';
 
-  const fallbacks: Record<string, any> = {
-    breakfast: { name: 'Haferflocken mit Skyr und Banane', ingredients: ['80 g Haferflocken', '200 g Skyr', '1 Stk Banane', '10 g Honig'], instructions: ['Haferflocken mit Skyr mischen', 'Banane in Scheiben schneiden und darauf legen', 'Mit Honig beträufeln'], calories: cal, protein: p, carbs: c, fats: f, prepTime: '5 min', requiredAppliances: [] },
-    lunch: { name: `${usePref}-Reis-Bowl`, ingredients: [`200 g ${usePref}`, '150 g Reis', '100 g Paprika', '50 g Zwiebel', '10 ml Olivenöl'], instructions: ['Reis kochen', `${usePref} anbraten`, 'Gemüse kleinschneiden und dazugeben', 'Alles in einer Bowl anrichten'], calories: cal, protein: p, carbs: c, fats: f, prepTime: '20 min', requiredAppliances: ['stove'] },
-    dinner: { name: `${usePref} mit Kartoffeln und Spinat`, ingredients: [`200 g ${usePref}`, '250 g Kartoffeln', '100 g Spinat', '10 ml Olivenöl', '1 Prise Salz'], instructions: ['Kartoffeln kochen', `${usePref} in der Pfanne braten`, 'Spinat dünsten', 'Zusammen servieren'], calories: cal, protein: p, carbs: c, fats: f, prepTime: '25 min', requiredAppliances: ['stove', 'oven'] },
-    snack: { name: 'Magerquark mit Nüssen und Honig', ingredients: ['250 g Magerquark', '20 g Walnüsse', '10 g Honig'], instructions: ['Quark in eine Schüssel geben', 'Nüsse und Honig darüber geben'], calories: cal, protein: p, carbs: c, fats: f, prepTime: '3 min', requiredAppliances: [] },
+  const isExcluded = (text: string) => exclusions.some(ex => text.toLowerCase().includes(ex));
+
+  // Multiple options per slot — pick the first that doesn't violate exclusions
+  const options: Record<string, any[]> = {
+    breakfast: [
+      { name: 'Haferflocken mit Skyr und Banane', ingredients: ['80 g Haferflocken', '200 g Skyr', '1 Stk Banane', '10 g Honig'], instructions: ['Haferflocken mit Skyr mischen', 'Banane in Scheiben schneiden und darauf legen', 'Mit Honig beträufeln'] },
+      { name: 'Rührei mit Vollkorntoast', ingredients: ['3 Stk Eier', '2 Scheiben Vollkornbrot', '10 g Butter', '1 Prise Salz'], instructions: ['Eier verquirlen und in der Pfanne stocken lassen', 'Toast rösten', 'Zusammen servieren'] },
+      { name: 'Naturjoghurt mit Banane und Haferflocken', ingredients: ['200 g Naturjoghurt', '1 Stk Banane', '50 g Haferflocken'], instructions: ['Joghurt in Schüssel geben', 'Banane schneiden', 'Haferflocken darüber streuen'] },
+    ],
+    lunch: [
+      { name: `${usePref}-Reis-Bowl`, ingredients: [`200 g ${usePref}`, '150 g Reis', '100 g Paprika', '50 g Zwiebel', '10 ml Olivenöl'], instructions: ['Reis kochen', `${usePref} anbraten`, 'Gemüse kleinschneiden und dazugeben'] },
+      { name: 'Kartoffel-Gemüse-Pfanne mit Ei', ingredients: ['300 g Kartoffeln', '100 g Zucchini', '100 g Paprika', '2 Stk Eier', '10 ml Olivenöl'], instructions: ['Kartoffeln würfeln und anbraten', 'Gemüse dazu', 'Eier unterrühren'] },
+      { name: 'Hähnchen-Wrap mit Salat', ingredients: ['200 g Hähnchenbrust', '2 Stk Tortillas', '50 g Salat', '50 g Tomate', '30 g Joghurt-Dressing'], instructions: ['Hähnchen braten und schneiden', 'Wraps füllen und einrollen'] },
+    ],
+    dinner: [
+      { name: `${usePref} mit Kartoffeln und Spinat`, ingredients: [`200 g ${usePref}`, '250 g Kartoffeln', '100 g Spinat', '10 ml Olivenöl'], instructions: ['Kartoffeln kochen', `${usePref} braten`, 'Spinat dünsten'] },
+      { name: 'Putenbrust mit Süßkartoffel', ingredients: ['200 g Putenbrust', '250 g Süßkartoffel', '100 g Zucchini', '10 ml Olivenöl'], instructions: ['Süßkartoffel im Ofen backen', 'Putenbrust anbraten', 'Zucchini dünsten'] },
+      { name: 'Rindfleisch-Reispfanne', ingredients: ['200 g Rindfleisch', '150 g Reis', '100 g Paprika', '50 g Mais', '10 ml Sojasoße'], instructions: ['Reis kochen', 'Rindfleisch anbraten', 'Gemüse und Soße dazugeben'] },
+    ],
+    snack: [
+      { name: 'Magerquark mit Banane und Honig', ingredients: ['250 g Magerquark', '1 Stk Banane', '10 g Honig'], instructions: ['Quark in Schüssel geben', 'Banane schneiden', 'Honig darüber'] },
+      { name: 'Reiswaffeln mit Hüttenkäse', ingredients: ['4 Stk Reiswaffeln', '100 g Hüttenkäse', '1 Prise Salz'], instructions: ['Hüttenkäse auf Reiswaffeln verteilen'] },
+      { name: 'Gekochte Eier mit Gurke', ingredients: ['3 Stk Eier', '1 Stk Gurke', '1 Prise Salz'], instructions: ['Eier hart kochen', 'Gurke in Scheiben schneiden'] },
+    ],
   };
-  return fallbacks[slot] || fallbacks.lunch;
+
+  const slotOptions = options[slot] || options.lunch;
+  const safe = slotOptions.find(opt => {
+    const allText = [opt.name, ...opt.ingredients].join(' ');
+    return !isExcluded(allText);
+  }) || slotOptions[slotOptions.length - 1]; // last resort
+
+  return { ...safe, calories: cal, protein: p, carbs: c, fats: f, prepTime: safe.instructions.length <= 2 ? '5 min' : '20 min', requiredAppliances: [] };
 }
 
 export const generateWorkoutPlan = async (

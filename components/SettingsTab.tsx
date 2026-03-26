@@ -915,12 +915,12 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
 
             {/* ── PUSH NOTIFICATIONS ── */}
             <div className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 space-y-6">
-              <div className="flex items-center gap-5">
-                <div className="w-14 h-14 bg-amber-500/15 rounded-2xl flex items-center justify-center text-amber-400 text-xl shrink-0">
+              <div className="flex items-center gap-3 sm:gap-5 min-w-0">
+                <div className="w-10 h-10 sm:w-14 sm:h-14 bg-amber-500/15 rounded-2xl flex items-center justify-center text-amber-400 text-lg sm:text-xl shrink-0">
                   <i className="fas fa-bell"></i>
                 </div>
-                <div>
-                  <h4 className="text-white font-black uppercase tracking-tight text-sm">{t.notifications}</h4>
+                <div className="min-w-0">
+                  <h4 className="text-white font-black uppercase tracking-tight text-xs sm:text-sm">Push</h4>
                 </div>
               </div>
 

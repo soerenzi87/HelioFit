@@ -362,6 +362,7 @@ export interface UserProfile {
   mockMode?: boolean;
   healthSourcePreferences?: HealthSourcePreferences;
   eatenMeals?: Record<string, string>; // key: "day|mealType", value: ISO timestamp
+  replacedMeals?: Record<string, Recipe>; // key: "day|mealType", value: old recipe before AI replan
   additionalFood?: Record<string, string>; // key: day name, value: free text of extra food eaten
   nutritionHistory?: { plan: WeeklyMealPlan; completedAt: string; eatenMeals: Record<string, string>; additionalFood?: Record<string, any> }[];
   notificationPreferences?: NotificationPreferences;
