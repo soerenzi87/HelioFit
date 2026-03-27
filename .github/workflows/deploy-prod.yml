@@ -1,0 +1,33 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: ${{ secrets.PROD_PORT }}
+          script: |
+            cd /opt/heliofit
+
+            # Quellcode updaten
+            rm -rf src/*
+            git clone --depth 1 https://github.com/soerenzi87/HelioFit.git /tmp/heliofit-deploy
+            cp -r /tmp/heliofit-deploy/* src/
+            rm -rf /tmp/heliofit-deploy
+
+            # Docker Image bauen & neu starten
+            cd src && docker build -f Dockerfile.prod -t heliofit-app:latest .
+            cd /opt/heliofit && docker compose down && docker compose up -d
+
+            # Cleanup
+            docker image prune -f
+            echo "Deploy complete!"
