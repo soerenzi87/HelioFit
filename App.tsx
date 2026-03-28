@@ -156,7 +156,7 @@ const App: React.FC = () => {
           setDb(finalDb);
           setProfile(serverProfile);
           if (serverProfile.isAdmin) setActiveTab('admin');
-          setWorkoutLogs(userData.logs || []);
+          setWorkoutLogs(userData.workoutLogs || []);
           if (serverProfile.mockMode && !userData.health) {
             const mockHealth = generateMockHealthData();
             setHealthData(mockHealth);
@@ -672,7 +672,7 @@ const App: React.FC = () => {
       ...prev,
       [profile.name]: {
         ...prev[profile.name],
-        logs: mergedLogs,
+        workoutLogs: mergedLogs,
         workoutPlan: null,
         profile: updatedProfile,
       }
@@ -714,7 +714,7 @@ const App: React.FC = () => {
     };
     setProfile(updatedProfile);
     setWorkoutLogs(mergedLogs);
-    setDb(prev => ({ ...prev, [getDbKey(profile)]: { ...prev[getDbKey(profile)], profile: updatedProfile, logs: mergedLogs } }));
+    setDb(prev => ({ ...prev, [getDbKey(profile)]: { ...prev[getDbKey(profile)], profile: updatedProfile, workoutLogs: mergedLogs } }));
     return importedLogs.length;
   };
 
@@ -785,7 +785,7 @@ const App: React.FC = () => {
       [profile.name]: {
         ...prev[profile.name],
         profile: resetProfile,
-        logs: [],
+        workoutLogs: [],
         health: resetHealth,
         weeklyPlan: null,
         workoutPlan: null,
@@ -840,7 +840,7 @@ const App: React.FC = () => {
               // Set local state from server response
               setProfile(serverProfile);
               if (serverProfile.isAdmin) setActiveTab('admin');
-              setWorkoutLogs(userData.logs || []);
+              setWorkoutLogs(userData.workoutLogs || []);
 
               if (serverProfile.mockMode && !userData.health) {
                 const mockHealth = generateMockHealthData();
@@ -1212,7 +1212,7 @@ const App: React.FC = () => {
                       }} 
                     />
                   )}
-                  <div style={{ display: activeTab === 'workout' ? 'block' : 'none' }}><WorkoutTab workoutProgram={workoutPlan} workoutLogs={workoutLogs} onGenerateWorkout={handleGenerateWorkout} onSaveLog={(log) => { const logs = [log, ...workoutLogs]; setWorkoutLogs(logs); setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], logs}})); }} onUpdateProfile={(up) => { setProfile(up); setDb(prev => ({...prev, [getDbKey(up)]: {...prev[getDbKey(up)], profile: up}})); }} onUpdateWorkoutPlan={(plan) => { setWorkoutPlan(plan); setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], workoutPlan: plan}})); }} onInterpretManualHistory={handleImportManualWorkoutHistory} onCompleteWeek={handleCompleteWorkoutWeek} isLoading={isGeneratingWorkout} language={language} profile={profile} healthData={healthData} recoverySummary={recoverySummary} recoveryInsight={recoveryInsight} onAnalyzeRecovery={handleAnalyzeRecovery} isAnalyzingRecovery={isAnalyzingRecovery} /></div>
+                  <div style={{ display: activeTab === 'workout' ? 'block' : 'none' }}><WorkoutTab workoutProgram={workoutPlan} workoutLogs={workoutLogs} onGenerateWorkout={handleGenerateWorkout} onSaveLog={(log) => { const wl = [log, ...workoutLogs]; setWorkoutLogs(wl); setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], workoutLogs: wl}})); }} onUpdateProfile={(up) => { setProfile(up); setDb(prev => ({...prev, [getDbKey(up)]: {...prev[getDbKey(up)], profile: up}})); }} onUpdateWorkoutPlan={(plan) => { setWorkoutPlan(plan); setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], workoutPlan: plan}})); }} onInterpretManualHistory={handleImportManualWorkoutHistory} onCompleteWeek={handleCompleteWorkoutWeek} isLoading={isGeneratingWorkout} language={language} profile={profile} healthData={healthData} recoverySummary={recoverySummary} recoveryInsight={recoveryInsight} onAnalyzeRecovery={handleAnalyzeRecovery} isAnalyzingRecovery={isAnalyzingRecovery} /></div>
                 </>
               )}
             </div>
