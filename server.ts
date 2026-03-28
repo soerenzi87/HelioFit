@@ -674,6 +674,29 @@ async function startServer() {
     }
   });
 
+  // POST /api/db/reset — force-clear specific fields for the logged-in user
+  app.post("/api/db/reset", async (req, res) => {
+    const email = (req as any).userEmail;
+    try {
+      const { fields } = req.body; // e.g. ["workoutLogs", "workoutPlan", "weeklyPlan"]
+      if (!Array.isArray(fields) || fields.length === 0) return res.status(400).json({ error: "Missing fields array" });
+      const allowedResetFields = ["workoutLogs", "workoutPlan", "weeklyPlan", "logs", "analysis", "progressAnalysis", "healthInsights", "correlationInsights", "health"];
+      const row = await readDb();
+      if (!row || !row.db[email]) return res.status(404).json({ error: "User not found" });
+      for (const field of fields) {
+        if (!allowedResetFields.includes(field)) continue;
+        const oldVal = row.db[email][field];
+        if (Array.isArray(oldVal)) row.db[email][field] = [];
+        else row.db[email][field] = null;
+      }
+      await writeDb(row.id, row.db);
+      res.json({ status: "ok", cleared: fields.filter(f => allowedResetFields.includes(f)) });
+    } catch (error) {
+      console.error("Error resetting fields:", error);
+      res.status(500).json({ error: "Failed to reset" });
+    }
+  });
+
   // POST /api/db/preferences — user-isolated
   app.post("/api/db/preferences", async (req, res) => {
     const email = (req as any).userEmail;

@@ -140,7 +140,7 @@ const App: React.FC = () => {
     const activeProfile = targetProfile || profile;
     if (!activeProfile) return;
     setHealthData(mergedData);
-    setDb(prev => ({ ...prev, [activeProfile.name]: { ...prev[activeProfile.name], health: mergedData } }));
+    setDb(prev => ({ ...prev, [getDbKey(activeProfile)]: { ...prev[getDbKey(activeProfile)], health: mergedData } }));
   };
 
   // Restore session from server on mount
@@ -173,6 +173,7 @@ const App: React.FC = () => {
           setWorkoutPlan(userData.workoutPlan || null);
           setHealthInsights(userData.healthInsights || []);
           if (userData.correlationInsights) setCorrelationInsights(userData.correlationInsights);
+          if (userData.recoveryInsight) setRecoveryInsight(userData.recoveryInsight);
           setIsSuperLoggedIn(true);
           localStorage.setItem('heliofit_user_email', key);
         }
@@ -187,25 +188,29 @@ const App: React.FC = () => {
 
   // Note: Profile restore on refresh is handled by the session restore useEffect above
 
-  // Save DB to server and localStorage
-  // Save DB to server — only when logged in (session exists)
+  // Save DB to server — debounced to prevent race conditions
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dbRef = useRef(db);
+  dbRef.current = db;
+
   useEffect(() => {
     if (isDbLoaded && isSuperLoggedIn && Object.keys(db).length > 0) {
       localStorage.setItem('heliofit_lang', language);
 
-      const saveToServer = async () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(async () => {
         try {
           await apiFetch('/api/db', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(db)
+            body: JSON.stringify(dbRef.current)
           });
         } catch (e) {
           console.error("Failed to save DB to server", e);
         }
-      };
-      saveToServer();
+      }, 500);
     }
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [db, isDbLoaded, isSuperLoggedIn, language]);
 
   // Re-apply source preferences live when they change
@@ -282,13 +287,12 @@ const App: React.FC = () => {
         setHealthData(null);
         const updatedDb = {
           ...db,
-          [profile.name]: {
-            ...db[profile.name],
+          [getDbKey(profile)]: {
+            ...db[getDbKey(profile)],
             health: null
           }
         };
         setDb(updatedDb);
-        localStorage.setItem('heliofit_manual_db_v1', JSON.stringify(updatedDb));
       }
       window.location.reload();
     };
@@ -343,7 +347,7 @@ const App: React.FC = () => {
           healthBridgeTokens: { access_token: token, last_sync: new Date().toISOString() } 
         };
         setProfile(activeProfile);
-        setDb(prev => ({ ...prev, [activeProfile.name]: { ...prev[activeProfile.name], profile: activeProfile } }));
+        setDb(prev => ({ ...prev, [getDbKey(activeProfile)]: { ...prev[getDbKey(activeProfile)], profile: activeProfile } }));
       }
 
       const lastSync = activeProfile.healthBridgeTokens?.last_sync;
@@ -389,7 +393,7 @@ const App: React.FC = () => {
         healthBridgeTokens: { ...activeProfile.healthBridgeTokens!, last_sync: new Date().toISOString() }
       };
       setProfile(finalProfile);
-      setDb(prev => ({ ...prev, [activeProfile.name]: { ...prev[activeProfile.name], profile: finalProfile } }));
+      setDb(prev => ({ ...prev, [getDbKey(activeProfile)]: { ...prev[getDbKey(activeProfile)], profile: finalProfile } }));
 
       const syncMsg = data.metrics.length === 1
         ? (language === 'de' ? '1 Tag aktualisiert' : '1 day updated')
@@ -403,7 +407,7 @@ const App: React.FC = () => {
         const updatedProfile = { ...targetProfile };
         delete updatedProfile.healthBridgeTokens;
         setProfile(updatedProfile);
-        setDb(prev => ({ ...prev, [targetProfile.name]: { ...prev[targetProfile.name], profile: updatedProfile } }));
+        setDb(prev => ({ ...prev, [getDbKey(targetProfile)]: { ...prev[getDbKey(targetProfile)], profile: updatedProfile } }));
       }
       alert(e.message || (language === 'de' ? "HealthBridge Sync fehlgeschlagen." : "HealthBridge sync failed."));
     } finally {
@@ -483,11 +487,11 @@ const App: React.FC = () => {
           };
         });
         setDb(prev => {
-          const existingUser = prev[profile.name];
+          const existingUser = prev[getDbKey(profile)];
           if (!existingUser) return prev;
           return {
             ...prev,
-            [profile.name]: {
+            [getDbKey(profile)]: {
               ...existingUser,
               profile: {
                 ...existingUser.profile,
@@ -577,6 +581,7 @@ const App: React.FC = () => {
         language
       );
       setRecoveryInsight(insight);
+      setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], recoveryInsight: insight}}));
     } catch (e) {
       console.error('Recovery analysis failed:', e);
     } finally {
@@ -670,8 +675,8 @@ const App: React.FC = () => {
     setProfile(updatedProfile);
     setDb(prev => ({
       ...prev,
-      [profile.name]: {
-        ...prev[profile.name],
+      [getDbKey(profile)]: {
+        ...prev[getDbKey(profile)],
         workoutLogs: mergedLogs,
         workoutPlan: null,
         profile: updatedProfile,
@@ -730,8 +735,8 @@ const App: React.FC = () => {
     setHealthData(mockHealth);
     setDb(prev => ({
       ...prev,
-      [profile.name]: {
-        ...prev[profile.name],
+      [getDbKey(profile)]: {
+        ...prev[getDbKey(profile)],
         profile: updatedProfile,
         health: mockHealth,
       }
@@ -780,10 +785,17 @@ const App: React.FC = () => {
     setHealthInsights([]);
     setActiveTab('overview');
 
+    // Force-clear on server first (bypasses empty-value protection)
+    apiFetch('/api/db/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: ['workoutLogs', 'workoutPlan', 'weeklyPlan', 'analysis', 'progressAnalysis', 'healthInsights', 'correlationInsights'] })
+    }).catch(e => console.error("Reset failed:", e));
+
     setDb(prev => ({
       ...prev,
-      [profile.name]: {
-        ...prev[profile.name],
+      [getDbKey(profile)]: {
+        ...prev[getDbKey(profile)],
         profile: resetProfile,
         workoutLogs: [],
         health: resetHealth,
@@ -792,6 +804,7 @@ const App: React.FC = () => {
         analysis: null,
         progressAnalysis: null,
         healthInsights: [],
+        correlationInsights: null,
       }
     }));
 
@@ -859,6 +872,7 @@ const App: React.FC = () => {
               setWorkoutPlan(userData.workoutPlan || null);
               setHealthInsights(userData.healthInsights || []);
               if (userData.correlationInsights) setCorrelationInsights(userData.correlationInsights);
+              if (userData.recoveryInsight) setRecoveryInsight(userData.recoveryInsight);
 
               setIsSuperLoggedIn(true);
               localStorage.setItem('heliofit_user_email', key);
@@ -1084,7 +1098,7 @@ const App: React.FC = () => {
                         try { 
                           const r = await analyzeHealthData(profile, healthData, language); 
                           setAnalysis(r); 
-                          setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], analysis: r}})); 
+                          setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], analysis: r}})); 
                         } catch(e) {} finally { setIsAnalyzing(false); } 
                       }} 
                       onAnalyzeProgress={async () => {
@@ -1092,7 +1106,7 @@ const App: React.FC = () => {
                         try {
                           const r = await analyzeOverallProgress(profile, healthData, workoutLogs, language);
                           setProgressAnalysis(r);
-                          setDb(prev => ({...prev, [profile.name]: {...prev[profile.name], progressAnalysis: r}}));
+                          setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], progressAnalysis: r}}));
                         } catch(e) {} finally { setIsAnalyzing(false); }
                       }}
                       onUpdateProfile={(up) => { 
@@ -1200,7 +1214,7 @@ const App: React.FC = () => {
                           setIsGeneratingPlan(false); 
                         } 
                       }} 
-                      onUpdateWeeklyPlan={(d, pl) => setWeeklyPlan(prev => ({...prev, [d]: pl}))}
+                      onUpdateWeeklyPlan={(d, pl) => { const updated = {...weeklyPlan, [d]: pl}; setWeeklyPlan(updated); setDb(prev => ({...prev, [getDbKey(profile)]: {...prev[getDbKey(profile)], weeklyPlan: updated}})); }}
                       onCompleteWeek={handleCompleteNutritionWeek}
                       isLoading={isGeneratingPlan} 
                       language={language} 
