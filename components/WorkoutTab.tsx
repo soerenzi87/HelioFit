@@ -61,8 +61,25 @@ const parseSuggestedWeight = (sw?: string): number => {
   if (!sw) return 0;
   const lower = sw.toLowerCase();
   if (lower.includes('körpergewicht') || lower.includes('bodyweight') || lower.includes('ohne')) return 0;
+  // "2x14kg" → 14, "60kg" → 60, "20-25kg" → last number before kg
+  const kgMatch = lower.match(/([\d.]+)\s*kg/);
+  if (kgMatch) return parseFloat(kgMatch[1]);
   const match = sw.match(/[\d.]+/);
   return match ? parseFloat(match[0]) : 0;
+};
+
+/** Extract a clean numeric placeholder from suggestedWeight: "2x14kg" → "14", "60kg" → "60" */
+const weightPlaceholder = (sw?: string): string => {
+  if (!sw) return '';
+  const v = parseSuggestedWeight(sw);
+  return v > 0 ? String(v) : '';
+};
+
+/** Extract a clean numeric placeholder from reps: "12 pro Bein" → "12", "8-10" → "10" */
+const repsPlaceholder = (reps?: string): string => {
+  if (!reps) return '';
+  const v = parseMaxReps(reps);
+  return v > 0 ? String(v) : '';
 };
 
 const parseMaxReps = (reps?: string): number => {
@@ -172,6 +189,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
   const [showAdHocModal, setShowAdHocModal] = useState(false);
   const [adHocActivity, setAdHocActivity] = useState('');
   const [adHocDuration, setAdHocDuration] = useState(60);
+  const [adHocDate, setAdHocDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [isEstimatingAdHoc, setIsEstimatingAdHoc] = useState(false);
   // ── Exercise history state ──
   const [historyExercise, setHistoryExercise] = useState<string | null>(null);
@@ -421,7 +439,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
     try {
       const result = await estimateActivityCalories(profile, adHocActivity.trim(), adHocDuration, language);
       const log: WorkoutLog = {
-        date: new Date().toISOString(),
+        date: new Date(adHocDate + 'T12:00:00').toISOString(),
         sessionTitle: result.activityType,
         exercises: [],
         durationMinutes: adHocDuration,
@@ -434,6 +452,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
       setShowAdHocModal(false);
       setAdHocActivity('');
       setAdHocDuration(60);
+      setAdHocDate(new Date().toISOString().slice(0, 10));
     } catch (e) {
       console.error("Failed to estimate activity:", e);
     } finally {
@@ -883,7 +902,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                             <input
                               type="number"
                               inputMode="decimal"
-                              placeholder={ex.suggestedWeight?.replace(/[^0-9.]/g, '') || ''}
+                              placeholder={weightPlaceholder(ex.suggestedWeight)}
                               value={set.weight || ''}
                               disabled={isSkipped || isDone}
                               onChange={(e) => { const copy = [...currentLog]; copy[exIdx].sets[sIdx].weight = parseFloat(e.target.value) || 0; setCurrentLog(copy); }}
@@ -905,7 +924,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                           <input
                             type="text"
                             inputMode="numeric"
-                            placeholder={ex.reps || ''}
+                            placeholder={repsPlaceholder(ex.reps) || ex.reps || ''}
                             value={isSkipped ? '-' : (set.reps || '')}
                             disabled={isSkipped || isDone}
                             onChange={(e) => { const copy = [...currentLog]; copy[exIdx].sets[sIdx].reps = parseFloat(e.target.value) || 0; setCurrentLog(copy); }}
@@ -1989,7 +2008,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
         <div className="fixed inset-0 z-[300] bg-[#0f172a]/80 backdrop-blur-xl flex items-center justify-center p-2 sm:p-6 animate-fade-in">
           <div className="bg-[#1a1f26] rounded-[2rem] sm:rounded-[3.5rem] p-5 sm:p-8 lg:p-12 max-w-lg w-full shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10 relative">
             <button
-              onClick={() => { setShowAdHocModal(false); setAdHocActivity(''); setAdHocDuration(60); }}
+              onClick={() => { setShowAdHocModal(false); setAdHocActivity(''); setAdHocDuration(60); setAdHocDate(new Date().toISOString().slice(0, 10)); }}
               className="absolute top-5 right-5 sm:top-8 sm:right-8 w-12 h-12 rounded-2xl bg-white/5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 flex items-center justify-center transition-all border border-white/5"
             >
               <i className="fas fa-times"></i>
@@ -2013,6 +2032,16 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                 />
               </div>
               <div>
+                <label className="block text-xs text-slate-400 mb-2 uppercase tracking-wider font-bold">{language === 'de' ? 'Datum' : 'Date'}</label>
+                <input
+                  type="date"
+                  value={adHocDate}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setAdHocDate(e.target.value)}
+                  className="w-full rounded-xl sm:rounded-2xl border border-white/10 bg-slate-900/60 px-5 py-4 text-sm text-white outline-none transition-all focus:border-emerald-500 [color-scheme:dark]"
+                />
+              </div>
+              <div>
                 <label className="block text-xs text-slate-400 mb-2 uppercase tracking-wider font-bold">{t.duration}</label>
                 <div className="flex items-center gap-3">
                   <input
@@ -2029,7 +2058,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
               </div>
               <div className="flex items-center justify-between gap-4 pt-2">
                 <button
-                  onClick={() => { setShowAdHocModal(false); setAdHocActivity(''); setAdHocDuration(60); }}
+                  onClick={() => { setShowAdHocModal(false); setAdHocActivity(''); setAdHocDuration(60); setAdHocDate(new Date().toISOString().slice(0, 10)); }}
                   className="px-6 py-4 bg-white/5 hover:bg-white/10 text-white rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest border border-white/10"
                 >
                   {t.close}
