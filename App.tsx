@@ -652,32 +652,17 @@ const App: React.FC = () => {
   const handleCompleteWorkoutWeek = () => {
     if (!profile || !workoutPlan) return;
 
-    const generatedLogs = workoutPlan.sessions.map((session, index) => ({
-      date: new Date(Date.now() - index * 24 * 60 * 60 * 1000).toISOString(),
-      sessionTitle: session.dayTitle,
-      exercises: session.exercises.map(exercise => ({
-        exerciseName: exercise.name,
-        sets: Array.from({ length: exercise.sets }, () => ({
-          weight: parsePlannedWeight(exercise.suggestedWeight),
-          reps: parsePlannedReps(exercise.reps),
-          weightText: exercise.suggestedWeight,
-          repsText: exercise.reps,
-        })),
-      })),
-    }));
-
+    // Archive the workout plan — do NOT generate fake log entries.
+    // Real logs already exist from live-tracked sessions.
     const archivedPlans = profile.workoutHistory ? [...profile.workoutHistory, workoutPlan] : [workoutPlan];
-    const mergedLogs = [...generatedLogs, ...workoutLogs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     const updatedProfile = { ...profile, workoutHistory: archivedPlans };
 
-    setWorkoutLogs(mergedLogs);
     setWorkoutPlan(null);
     setProfile(updatedProfile);
     setDb(prev => ({
       ...prev,
       [getDbKey(profile)]: {
         ...prev[getDbKey(profile)],
-        workoutLogs: mergedLogs,
         workoutPlan: null,
         profile: updatedProfile,
       }
