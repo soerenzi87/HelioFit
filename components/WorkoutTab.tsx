@@ -906,9 +906,9 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                               value={set.weight || ''}
                               disabled={isSkipped || isDone}
                               onChange={(e) => { const copy = [...currentLog]; copy[exIdx].sets[sIdx].weight = parseFloat(e.target.value) || 0; setCurrentLog(copy); }}
-                              className={`w-full bg-slate-900/50 rounded-xl p-3 sm:p-4 outline-none font-black text-lg sm:text-xl transition-all ${isSkipped ? 'text-red-300 border border-red-500/10' : isDone ? 'text-emerald-300 border border-emerald-500/10' : 'text-white border border-white/5 focus:border-indigo-500 focus:bg-slate-900'}`}
+                              className={`w-full bg-slate-900/50 rounded-xl p-3 pr-9 sm:p-4 sm:pr-10 outline-none font-black text-base sm:text-xl transition-all ${isSkipped ? 'text-red-300 border border-red-500/10' : isDone ? 'text-emerald-300 border border-emerald-500/10' : 'text-white border border-white/5 focus:border-indigo-500 focus:bg-slate-900'}`}
                             />
-                            <span className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-600 uppercase">kg</span>
+                            <span className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 text-[9px] sm:text-[10px] font-black text-slate-600 uppercase">kg</span>
                           </div>
                         </div>
                         ) : (
