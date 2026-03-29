@@ -189,7 +189,7 @@ const Dashboard: React.FC<DashboardProps> = ({ analysis, progressAnalysis, profi
           {analysis ? (
             <div className="space-y-6 relative z-10">
               <div className="p-6 bg-white/5 rounded-[1.5rem] border border-white/5 italic">
-                <p className="text-slate-300 leading-relaxed text-lg font-medium">"{analysis.summary}"</p>
+                <p className="text-slate-300 leading-relaxed text-base sm:text-lg font-medium">"{analysis.summary}"</p>
               </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -218,7 +218,7 @@ const Dashboard: React.FC<DashboardProps> = ({ analysis, progressAnalysis, profi
               <button 
                 key={val} 
                 onClick={() => handleDeficitChange(val)}
-                className={`px-6 py-5 rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest transition-all border ${currentDeficit === val ? 'bg-orange-600 border-orange-500 text-white shadow-xl shadow-orange-600/20' : 'bg-slate-800/50 border-white/5 text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                className={`px-4 py-3 sm:px-6 sm:py-5 rounded-xl sm:rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest transition-all border ${currentDeficit === val ? 'bg-orange-600 border-orange-500 text-white shadow-xl shadow-orange-600/20' : 'bg-slate-800/50 border-white/5 text-slate-400 hover:text-white hover:bg-slate-800'}`}
               >
                 {val === 0 ? t.deficitMaintenance : val === -250 ? t.deficitMild : val === -500 ? t.deficitStandard : t.deficitAggressive}
               </button>
@@ -326,23 +326,23 @@ const Dashboard: React.FC<DashboardProps> = ({ analysis, progressAnalysis, profi
                     <div className="w-8 h-8 rounded-xl bg-slate-700 flex items-center justify-center text-slate-400 text-xs"><i className="fas fa-calculator"></i></div>
                     <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{t.energy}</p>
                   </div>
-                  <p className="font-black text-2xl text-white">{analysis.targets.maintenanceCalories} <span className="text-[10px] text-slate-500 uppercase tracking-widest">kcal</span></p>
+                  <p className="font-black text-xl sm:text-2xl text-white">{analysis.targets.maintenanceCalories} <span className="text-[10px] text-slate-500 uppercase tracking-widest">kcal</span></p>
                 </div>
                 <div className="p-5 bg-indigo-600/10 rounded-[1.5rem] border border-indigo-500/20">
                   <div className="flex items-center gap-3 mb-3">
                     <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-xs"><i className="fas fa-bullseye"></i></div>
                     <p className="text-[10px] text-indigo-400 font-black uppercase tracking-widest">{t.recommended}</p>
                   </div>
-                  <p className="font-black text-2xl text-indigo-400">{(analysis.targets.maintenanceCalories || 0) + (profile.calorieAdjustment || 0)} <span className="text-[10px] text-indigo-500/60 uppercase tracking-widest">kcal</span></p>
+                  <p className="font-black text-xl sm:text-2xl text-indigo-400">{(analysis.targets.maintenanceCalories || 0) + (profile.calorieAdjustment || 0)} <span className="text-[10px] text-indigo-500/60 uppercase tracking-widest">kcal</span></p>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between p-6 bg-blue-600/10 rounded-[2rem] border border-blue-500/20">
-                <div className="flex items-center gap-5">
-                  <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center text-white text-2xl shadow-lg shadow-blue-600/20"><i className="fas fa-glass-water"></i></div>
+              <div className="flex items-center justify-between p-4 sm:p-6 bg-blue-600/10 rounded-[2rem] border border-blue-500/20">
+                <div className="flex items-center gap-3 sm:gap-5">
+                  <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-2xl bg-blue-600 flex items-center justify-center text-white text-lg sm:text-2xl shadow-lg shadow-blue-600/20"><i className="fas fa-glass-water"></i></div>
                   <div>
                     <p className="text-[10px] text-blue-400 font-black uppercase tracking-[0.2em] mb-1">{t.hydration}</p>
-                    <p className="font-black text-3xl text-white leading-none">{analysis.targets.water} <span className="text-xs font-black text-slate-500 uppercase tracking-widest">{t.liter}</span></p>
+                    <p className="font-black text-2xl sm:text-3xl text-white leading-none">{analysis.targets.water} <span className="text-xs font-black text-slate-500 uppercase tracking-widest">{t.liter}</span></p>
                   </div>
                 </div>
               </div>
@@ -720,7 +720,7 @@ const ProgressProjectionTile: React.FC<ProjectionProps> = ({ profile, analysis, 
       )}
 
       {/* Milestone cards */}
-      <div className="grid grid-cols-4 gap-2 sm:gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-6">
         {[
           { label: t.now, w: data[0].weight, bf: data[0].bodyFat, aw: data[0].actualWeight, abf: data[0].actualBodyFat },
           { label: t.target4, w: w4.weight, bf: w4.bodyFat, aw: w4.actualWeight, abf: w4.actualBodyFat },

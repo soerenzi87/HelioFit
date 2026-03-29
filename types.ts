@@ -209,6 +209,9 @@ export interface WorkoutLog {
   exercises: ExerciseLog[];
   durationMinutes?: number;
   notes?: string;
+  caloriesBurned?: number;
+  isAdHoc?: boolean;           // true for manually added activities (Padel, Fußball, etc.)
+  activityType?: string;       // e.g. "Padel Tennis", "Schwimmen"
 }
 
 export interface WorkoutSession {
@@ -426,6 +429,14 @@ export interface CorrelationInsight {
   explanation: string;
   actionable: string;          // concrete recommendation
   impact: 'positive' | 'neutral' | 'negative';
+}
+
+// ── Recovery Insight Bubbles ──────────────────────────────────
+export interface RecoveryBubble {
+  icon: string;         // FontAwesome icon name (e.g. "fa-heart-pulse")
+  label: string;        // Short title (e.g. "Recovery Score")
+  value: string;        // Short summary text
+  status: 'good' | 'warning' | 'bad';  // Color coding
 }
 
 // ── Notification Preferences ──────────────────────────────────

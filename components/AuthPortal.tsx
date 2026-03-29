@@ -103,12 +103,12 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
         </div>
       </div>
 
-      <div className="w-full max-w-lg bg-[#1a1f26]/80 backdrop-blur-3xl border border-white/5 rounded-[4rem] p-10 lg:p-14 shadow-[0_50px_100px_rgba(0,0,0,0.5)] relative overflow-hidden transition-all duration-700">
+      <div className="w-full max-w-lg bg-[#1a1f26]/80 backdrop-blur-3xl border border-white/5 rounded-[2rem] sm:rounded-[4rem] p-6 sm:p-10 lg:p-14 shadow-[0_50px_100px_rgba(0,0,0,0.5)] relative overflow-hidden transition-all duration-700">
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-indigo-600/50 to-transparent"></div>
         
-        <div className="text-center mb-12">
-          <div className="w-24 h-24 bg-white rounded-[2.5rem] flex items-center justify-center text-slate-900 text-4xl font-black mx-auto mb-10 shadow-[0_20px_40px_rgba(255,255,255,0.1)] italic relative group">
-            <div className="absolute inset-0 bg-indigo-600 rounded-[2.5rem] animate-ping opacity-10 group-hover:opacity-20 transition-opacity"></div>
+        <div className="text-center mb-8 sm:mb-12">
+          <div className="w-16 h-16 sm:w-24 sm:h-24 bg-white rounded-[1.5rem] sm:rounded-[2.5rem] flex items-center justify-center text-slate-900 text-2xl sm:text-4xl font-black mx-auto mb-6 sm:mb-10 shadow-[0_20px_40px_rgba(255,255,255,0.1)] italic relative group">
+            <div className="absolute inset-0 bg-indigo-600 rounded-[1.5rem] sm:rounded-[2.5rem] animate-ping opacity-10 group-hover:opacity-20 transition-opacity"></div>
             <span className="relative z-10">H</span>
           </div>
           <h2 className="text-3xl font-black text-white uppercase tracking-tighter mb-4">{t.title}</h2>
@@ -133,14 +133,14 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
               <div className="grid grid-cols-1 gap-4">
                 <button 
                   onClick={() => setView('email-login')}
-                  className="w-full py-6 bg-white/5 hover:bg-white/10 text-white rounded-[2rem] font-black uppercase tracking-widest text-[11px] transition-all flex items-center justify-center gap-4 border border-white/10 group shadow-xl"
+                  className="w-full py-4 sm:py-6 bg-white/5 hover:bg-white/10 text-white rounded-2xl sm:rounded-[2rem] font-black uppercase tracking-widest text-[11px] transition-all flex items-center justify-center gap-4 border border-white/10 group shadow-xl"
                 >
                   <i className="fas fa-envelope text-indigo-500 group-hover:scale-125 transition-transform"></i> {t.emailBtn}
                 </button>
 
                 <button 
                   onClick={onRegister}
-                  className="w-full py-6 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 rounded-[2rem] font-black uppercase tracking-widest text-[11px] transition-all flex items-center justify-center gap-4 border border-indigo-500/20 group"
+                  className="w-full py-4 sm:py-6 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 rounded-2xl sm:rounded-[2rem] font-black uppercase tracking-widest text-[11px] transition-all flex items-center justify-center gap-4 border border-indigo-500/20 group"
                 >
                   <i className="fas fa-user-plus group-hover:scale-125 transition-transform"></i> {t.registerBtn}
                 </button>
@@ -188,7 +188,7 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
 
               <button 
                 type="submit"
-                className="w-full py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-[12px] transition-all shadow-[0_20px_50px_rgba(79,70,229,0.3)] active:scale-95"
+                className="w-full py-4 sm:py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl sm:rounded-[2rem] font-black uppercase tracking-[0.2em] text-[12px] transition-all shadow-[0_20px_50px_rgba(79,70,229,0.3)] active:scale-95"
               >
                 {t.loginBtn}
               </button>
@@ -205,7 +205,7 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
 
           {view === 'pending-approval' && (
             <div className="text-center space-y-10 animate-fade-in py-6">
-              <div className="w-28 h-28 bg-indigo-600/10 rounded-[2.5rem] flex items-center justify-center text-indigo-500 text-5xl mx-auto mb-8 border border-indigo-500/20 shadow-2xl animate-pulse">
+              <div className="w-20 h-20 sm:w-28 sm:h-28 bg-indigo-600/10 rounded-[2.5rem] flex items-center justify-center text-indigo-500 text-3xl sm:text-5xl mx-auto mb-8 border border-indigo-500/20 shadow-2xl animate-pulse">
                 <i className="fas fa-clock"></i>
               </div>
               <div className="space-y-4">
@@ -217,15 +217,15 @@ const AuthPortal: React.FC<AuthPortalProps> = ({ onLogin, onRegister, language, 
                 onClick={() => {
                   window.location.reload(); 
                 }}
-                className="w-full py-6 bg-white/5 hover:bg-white/10 text-white rounded-[2rem] font-black uppercase tracking-widest text-[11px] transition-all border border-white/10 shadow-xl mt-6"
+                className="w-full py-4 sm:py-6 bg-white/5 hover:bg-white/10 text-white rounded-2xl sm:rounded-[2rem] font-black uppercase tracking-widest text-[11px] transition-all border border-white/10 shadow-xl mt-6"
               >
                 <i className="fas fa-arrow-left"></i> {t.pendingBack}
               </button>
             </div>
           )}
 
-          <div className="mt-14 pt-10 border-t border-white/5 text-center">
-            <div className="flex justify-center gap-10 text-slate-700 text-lg mb-6">
+          <div className="mt-8 sm:mt-14 pt-6 sm:pt-10 border-t border-white/5 text-center">
+            <div className="flex justify-center gap-6 sm:gap-10 text-slate-700 text-lg mb-6">
               <i className="fas fa-shield-halved hover:text-indigo-500 transition-colors cursor-help" title={t.securityEncryption}></i>
               <i className="fas fa-fingerprint hover:text-indigo-500 transition-colors cursor-help" title={t.securityIdentity}></i>
               <i className="fas fa-microchip hover:text-indigo-500 transition-colors cursor-help" title={t.securityAi}></i>

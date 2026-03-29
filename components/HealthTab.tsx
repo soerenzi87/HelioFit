@@ -24,6 +24,7 @@ type VitalSubType = 'heartRate' | 'hrv' | 'spo2' | 'respiratoryRate' | 'bodyTemp
 
 const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, onUpdateInsights, onResetSync, onUploadData, isLoading, language, correlationInsights, onAnalyzeCorrelations, isAnalyzingCorrelations }) => {
   const [selectedInsight, setSelectedInsight] = useState<HealthInsight | null>(null);
+  const [correlationExpanded, setCorrelationExpanded] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isParsingApple, setIsParsingApple] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<MetricCategory | null>(null);
@@ -932,7 +933,7 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
                     <span className="text-sm font-black text-white uppercase tracking-widest">{activeOpt.label}</span>
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-2">{activeReadings.length} {t.readings}</span>
                   </div>
-                  <div className="h-[400px]">
+                  <div className="h-[250px] sm:h-[400px]">
                     <ResponsiveContainer width="100%" height="100%">
                       {isBP ? (
                         <LineChart data={chartData}>
@@ -961,9 +962,9 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
               )}
 
               {/* Individual Readings Table */}
-              <div className="bg-slate-800/20 rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden backdrop-blur-sm">
-                <div className="p-10 border-b border-white/5 bg-white/2 flex items-center justify-between">
-                  <h3 className="text-xl font-black text-white uppercase tracking-tight">{t.history}</h3>
+              <div className="bg-slate-800/20 rounded-2xl sm:rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden backdrop-blur-sm">
+                <div className="p-5 sm:p-10 border-b border-white/5 bg-white/2 flex items-center justify-between">
+                  <h3 className="text-base sm:text-xl font-black text-white uppercase tracking-tight">{t.history}</h3>
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{activeReadings.length} {t.readings}</span>
                 </div>
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto no-scrollbar">
@@ -1036,9 +1037,9 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
               </div>
 
               {/* Individual readings table */}
-              <div className="bg-slate-800/20 rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden backdrop-blur-sm">
-                <div className="p-10 border-b border-white/5 bg-white/2 flex items-center justify-between">
-                  <h3 className="text-xl font-black text-white uppercase tracking-tight">{t.history}</h3>
+              <div className="bg-slate-800/20 rounded-2xl sm:rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden backdrop-blur-sm">
+                <div className="p-5 sm:p-10 border-b border-white/5 bg-white/2 flex items-center justify-between">
+                  <h3 className="text-base sm:text-xl font-black text-white uppercase tracking-tight">{t.history}</h3>
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{activityReadings.length} {t.readings}</span>
                 </div>
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto no-scrollbar">
@@ -1096,7 +1097,7 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
                   <span className="text-sm font-black text-white uppercase tracking-widest">{t.weight}</span>
                   {hasReadings && <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-2">{weightReadings.length} {t.readings}</span>}
                 </div>
-                <div className="h-[400px]">
+                <div className="h-[250px] sm:h-[400px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={chartData}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
@@ -1114,9 +1115,9 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
               </div>
 
               {/* Individual weight readings table */}
-              <div className="bg-slate-800/20 rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden backdrop-blur-sm">
-                <div className="p-10 border-b border-white/5 bg-white/2 flex items-center justify-between">
-                  <h3 className="text-xl font-black text-white uppercase tracking-tight">{t.history}</h3>
+              <div className="bg-slate-800/20 rounded-2xl sm:rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden backdrop-blur-sm">
+                <div className="p-5 sm:p-10 border-b border-white/5 bg-white/2 flex items-center justify-between">
+                  <h3 className="text-base sm:text-xl font-black text-white uppercase tracking-tight">{t.history}</h3>
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{hasReadings ? weightReadings.length : filteredMetrics.filter(m => m.weight).length} {t.readings}</span>
                 </div>
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto no-scrollbar">
@@ -1171,7 +1172,7 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
             <div className="max-w-5xl mx-auto w-full space-y-6 sm:space-y-10 pb-32">
 
               {/* Body silhouette + composition breakdown */}
-              <div className="bg-slate-800/30 p-8 sm:p-12 rounded-[3.5rem] border border-white/5 shadow-2xl backdrop-blur-sm">
+              <div className="bg-slate-800/30 p-4 sm:p-12 rounded-2xl sm:rounded-[3.5rem] border border-white/5 shadow-2xl backdrop-blur-sm">
                 <BodyCompositionVisual />
               </div>
 
@@ -1193,9 +1194,9 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
               </div>
 
               {/* History table */}
-              <div className="bg-slate-800/20 rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden backdrop-blur-sm">
-                <div className="p-10 border-b border-white/5 bg-white/2">
-                  <h3 className="text-xl font-black text-white uppercase tracking-tight">{t.history}</h3>
+              <div className="bg-slate-800/20 rounded-2xl sm:rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden backdrop-blur-sm">
+                <div className="p-5 sm:p-10 border-b border-white/5 bg-white/2">
+                  <h3 className="text-base sm:text-xl font-black text-white uppercase tracking-tight">{t.history}</h3>
                 </div>
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto no-scrollbar">
                   <table className="w-full text-left">
@@ -1259,9 +1260,9 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
                 </ResponsiveContainer>
               </div>
 
-              <div className="bg-slate-800/20 rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden backdrop-blur-sm">
-                <div className="p-10 border-b border-white/5 bg-white/2">
-                  <h3 className="text-xl font-black text-white uppercase tracking-tight">{t.history}</h3>
+              <div className="bg-slate-800/20 rounded-2xl sm:rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden backdrop-blur-sm">
+                <div className="p-5 sm:p-10 border-b border-white/5 bg-white/2">
+                  <h3 className="text-base sm:text-xl font-black text-white uppercase tracking-tight">{t.history}</h3>
                 </div>
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto no-scrollbar">
                   <table className="w-full text-left">
@@ -1300,10 +1301,10 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
   };
 
   if ((!healthData || healthData?.metrics?.length === 0) && !isLoading && !isParsingApple) return (
-    <div className="bg-[#1a1f26] rounded-[2.5rem] p-12 text-center border border-white/5 shadow-2xl space-y-8 animate-fade-in">
-      <div className="w-24 h-24 bg-indigo-600/10 text-indigo-400 rounded-3xl flex items-center justify-center text-4xl mx-auto border border-indigo-500/20 shadow-xl shadow-indigo-600/10"><i className="fas fa-file-medical"></i></div>
+    <div className="bg-[#1a1f26] rounded-2xl sm:rounded-[2.5rem] p-6 sm:p-12 text-center border border-white/5 shadow-2xl space-y-8 animate-fade-in">
+      <div className="w-16 h-16 sm:w-24 sm:h-24 bg-indigo-600/10 text-indigo-400 rounded-3xl flex items-center justify-center text-2xl sm:text-4xl mx-auto border border-indigo-500/20 shadow-xl shadow-indigo-600/10"><i className="fas fa-file-medical"></i></div>
       <div className="max-w-md mx-auto space-y-4">
-        <h2 className="text-3xl font-black text-white tracking-tight">{t.noSync}</h2>
+        <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">{t.noSync}</h2>
         <p className="text-slate-500 font-bold text-sm leading-relaxed">{language === 'de' ? 'Bitte konfiguriere deine Datenquellen in den Einstellungen.' : 'Please configure your data sources in the settings.'}</p>
       </div>
     </div>
@@ -1324,8 +1325,8 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
 
       {/* Insight Modal */}
       {selectedInsight && (
-        <div className="fixed inset-0 z-[150] bg-[#0f172a]/80 backdrop-blur-xl flex items-center justify-center p-6 animate-fade-in transition-all">
-          <div className="bg-[#1a1f26] rounded-[3rem] p-10 max-w-xl w-full shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10 animate-scale-in relative text-white">
+        <div className="fixed inset-0 z-[150] bg-[#0f172a]/80 backdrop-blur-xl flex items-center justify-center p-3 sm:p-6 animate-fade-in transition-all">
+          <div className="bg-[#1a1f26] rounded-2xl sm:rounded-[3rem] p-5 sm:p-10 max-w-xl w-full shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10 animate-scale-in relative text-white">
             <button 
               onClick={() => setSelectedInsight(null)} 
               className="absolute top-8 right-8 w-12 h-12 rounded-2xl bg-white/5 hover:bg-red-500/20 flex items-center justify-center text-slate-400 hover:text-red-500 transition-all border border-white/5"
@@ -1335,8 +1336,8 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
             <div className={`w-16 h-16 ${getInsightStyle(selectedInsight).bg.replace('bg-', 'bg-').replace('-50', '-600/20')} ${getInsightStyle(selectedInsight).text.replace('text-', 'text-').replace('-600', '-400')} rounded-[1.25rem] border border-white/5 flex items-center justify-center text-3xl mb-8 shadow-xl`}>
               <i className={`fas ${getInsightStyle(selectedInsight).icon}`}></i>
             </div>
-            <h3 className="text-3xl font-black text-white mb-6 tracking-tighter uppercase">{selectedInsight.title}</h3>
-            <div className="p-8 bg-slate-800/50 rounded-[2rem] border border-white/5 mb-8 italic">
+            <h3 className="text-xl sm:text-3xl font-black text-white mb-6 tracking-tighter uppercase">{selectedInsight.title}</h3>
+            <div className="p-4 sm:p-8 bg-slate-800/50 rounded-xl sm:rounded-[2rem] border border-white/5 mb-8 italic">
               <p className="text-slate-300 font-bold leading-relaxed text-lg">"{selectedInsight.detail}"</p>
             </div>
             <button
@@ -1350,14 +1351,14 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
       )}
 
       {/* Checkup Cockpit */}
-      <div className="bg-[#1a1f26] p-10 rounded-[2.5rem] border border-white/5 shadow-2xl overflow-hidden relative">
+      <div className="bg-[#1a1f26] p-5 sm:p-10 rounded-2xl sm:rounded-[2.5rem] border border-white/5 shadow-2xl overflow-hidden relative">
         <div className="absolute top-0 right-0 p-10 opacity-5 text-9xl pointer-events-none translate-x-4 transition-transform hover:-rotate-12 duration-1000"><i className="fas fa-wand-magic-sparkles text-white"></i></div>
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-10 relative z-10">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-6 sm:mb-10 relative z-10">
           <div>
             <p className="text-emerald-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2">Health Intelligence</p>
-            <h3 className="text-3xl font-black flex items-center gap-4 tracking-tighter text-white uppercase">{t.checkup}</h3>
+            <h3 className="text-xl sm:text-3xl font-black flex items-center gap-4 tracking-tighter text-white uppercase">{t.checkup}</h3>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button onClick={onResetSync} className="px-6 py-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all shadow-xl">
               <i className="fas fa-unlink"></i> {t.resetSync}
             </button>
@@ -1369,7 +1370,7 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
 
         {isAnalyzing ? (
           <div className="flex gap-4 animate-pulse overflow-x-auto no-scrollbar pb-6 px-2">
-            {[1, 2, 3, 4, 5].map(i => <div key={i} className="h-48 min-w-[280px] bg-slate-800/50 rounded-[2rem] flex-shrink-0 border border-white/5"></div>)}
+            {[1, 2, 3, 4, 5].map(i => <div key={i} className="h-48 min-w-[240px] sm:min-w-[280px] bg-slate-800/50 rounded-[2rem] flex-shrink-0 border border-white/5"></div>)}
           </div>
         ) : (
           <div className="relative">
@@ -1394,7 +1395,7 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
                   <button
                     key={idx}
                     onClick={() => setSelectedInsight(insight)}
-                    className={`flex-shrink-0 snap-start flex flex-col gap-5 p-8 w-[300px] sm:w-[340px] lg:w-[380px] bg-slate-800/30 border border-white/5 rounded-[3rem] transition-all hover:bg-slate-800/50 hover:border-white/10 hover:shadow-2xl active:scale-[0.98] group relative overflow-hidden`}
+                    className={`flex-shrink-0 snap-start flex flex-col gap-5 p-8 w-[260px] sm:w-[340px] lg:w-[380px] bg-slate-800/30 border border-white/5 rounded-[3rem] transition-all hover:bg-slate-800/50 hover:border-white/10 hover:shadow-2xl active:scale-[0.98] group relative overflow-hidden`}
                   >
                     <div className={`absolute top-0 right-0 p-5 bg-${impactColor}-500/10 text-${impactColor}-400 rounded-bl-[2rem] border-l border-b border-white/5 transition-colors group-hover:bg-${impactColor}-500/20`}>
                        <i className={`fas ${style.impactInfo.icon} text-xl`}></i>
@@ -1435,15 +1436,18 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
         )}
       </div>
 
-      {/* Correlation Insights */}
-      <div className="bg-[#1a1f26] p-10 rounded-[2.5rem] border border-white/5 shadow-2xl">
-        <div className="flex items-center justify-between mb-8">
+      {/* Correlation Insights — collapsible */}
+      <div className="bg-[#1a1f26] p-5 sm:p-10 rounded-2xl sm:rounded-[2.5rem] border border-white/5 shadow-2xl">
+        <div
+          onClick={() => setCorrelationExpanded(!correlationExpanded)}
+          className="flex items-center justify-between cursor-pointer group"
+        >
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-indigo-600/10 text-indigo-400 rounded-2xl flex items-center justify-center text-xl border border-indigo-500/20 shadow-xl">
               <i className="fas fa-diagram-project"></i>
             </div>
             <div>
-              <h4 className="text-2xl font-black text-white tracking-tight uppercase">{t.correlationTitle}</h4>
+              <h4 className="text-lg sm:text-2xl font-black text-white tracking-tight uppercase group-hover:text-indigo-400 transition-colors">{t.correlationTitle}</h4>
               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">
                 {correlationInsights && correlationInsights.length > 0
                   ? `${correlationInsights.length} ${language === 'de' ? 'Zusammenhänge' : 'correlations'}`
@@ -1451,6 +1455,24 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
               </p>
             </div>
           </div>
+          <div className="flex items-center gap-3">
+            {!correlationExpanded && onAnalyzeCorrelations && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onAnalyzeCorrelations(); setCorrelationExpanded(true); }}
+                disabled={isAnalyzingCorrelations}
+                className="px-4 sm:px-6 py-2.5 sm:py-3 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/20 rounded-2xl text-xs font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed hidden sm:block"
+              >
+                {isAnalyzingCorrelations ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-magnifying-glass-chart"></i>}
+              </button>
+            )}
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-slate-800 border border-white/5 text-slate-500 group-hover:text-white flex items-center justify-center transition-all">
+              <i className={`fas fa-chevron-${correlationExpanded ? 'up' : 'down'} text-xs sm:text-sm`}></i>
+            </div>
+          </div>
+        </div>
+
+        {correlationExpanded && (
+        <div className="mt-6 sm:mt-8 space-y-6">
           {onAnalyzeCorrelations && (
             <button
               onClick={onAnalyzeCorrelations}
@@ -1470,7 +1492,6 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
               )}
             </button>
           )}
-        </div>
 
         {correlationInsights && correlationInsights.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1483,7 +1504,7 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
               const barWidth = Math.round(Math.abs(ci.correlation) * 100);
 
               return (
-                <div key={idx} className="bg-white/5 rounded-[2rem] p-6 border border-white/10 flex flex-col gap-4 transition-transform hover:scale-[1.01]">
+                <div key={idx} className="bg-white/5 rounded-xl sm:rounded-[2rem] p-4 sm:p-6 border border-white/10 flex flex-col gap-4 transition-transform hover:scale-[1.01]">
                   <h5 className="text-lg font-black text-white tracking-tight leading-tight">{ci.title}</h5>
 
                   {/* Correlation bar */}
@@ -1520,10 +1541,12 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
             })}
           </div>
         ) : (
-          <div className="py-16 px-10 bg-slate-800/20 border-2 border-dashed border-white/5 rounded-[3.5rem] w-full flex flex-col items-center justify-center gap-6 text-slate-500">
+          <div className="py-12 sm:py-16 px-6 sm:px-10 bg-slate-800/20 border-2 border-dashed border-white/5 rounded-2xl sm:rounded-[3.5rem] w-full flex flex-col items-center justify-center gap-6 text-slate-500">
             <i className="fas fa-diagram-project text-5xl opacity-10 text-indigo-500"></i>
             <p className="text-sm font-bold italic text-center max-w-sm tracking-wide leading-relaxed">{t.noCorrelations}</p>
           </div>
+        )}
+        </div>
         )}
       </div>
 
@@ -1543,17 +1566,17 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
         ].filter(i => i.value != null);
         if (items.length === 0) return null;
         return (
-          <div className="bg-[#1a1f26] p-10 rounded-[2.5rem] border border-white/5 shadow-2xl">
+          <div className="bg-[#1a1f26] p-5 sm:p-10 rounded-2xl sm:rounded-[2.5rem] border border-white/5 shadow-2xl">
             <div className="flex items-center gap-4 mb-8">
               <div className="w-12 h-12 bg-violet-600/10 text-violet-400 rounded-2xl flex items-center justify-center text-xl border border-violet-500/20 shadow-xl"><i className="fas fa-person-rays"></i></div>
               <div>
-                <h4 className="text-2xl font-black text-white tracking-tight uppercase">{t.bodyComp}</h4>
+                <h4 className="text-lg sm:text-2xl font-black text-white tracking-tight uppercase">{t.bodyComp}</h4>
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">{language === 'de' ? 'Aktuelle Messwerte' : 'Latest Readings'}</p>
               </div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {items.map(item => (
-                <div key={item.label} className={`${item.bg} rounded-[2rem] p-6 text-center border border-white/5 transition-transform hover:scale-[1.03]`}>
+                <div key={item.label} className={`${item.bg} rounded-xl sm:rounded-[2rem] p-4 sm:p-6 text-center border border-white/5 transition-transform hover:scale-[1.03]`}>
                   <div className={`${item.color} text-xl mb-3`}><i className={`fas ${item.icon}`}></i></div>
                   <div className="text-2xl font-black text-white tracking-tighter">{item.value}<span className="text-xs text-slate-500 ml-0.5">{item.unit}</span></div>
                   <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-2">{item.label}</div>
@@ -1584,7 +1607,7 @@ const HealthTab: React.FC<HealthTabProps> = ({ profile, healthData, insights, on
             { cat: 'regeneration', title: t.regeneration, icon: 'fa-bed', color: '#6366f1', bg: 'bg-indigo-600/10', text: 'text-indigo-400', data: formattedMetrics.slice(-14), key: 'sleepHours', chartType: 'bar' as const, hasData: formattedMetrics.some(m => m.sleepHours) },
           ];
         })().filter(item => item.hasData).map(item => (
-          <div key={item.cat} onClick={() => setSelectedCategory(item.cat as any)} className="bg-[#1a1f26] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl hover:bg-slate-800/50 transition-all cursor-pointer group hover:scale-[1.02] active:scale-[0.98]">
+          <div key={item.cat} onClick={() => setSelectedCategory(item.cat as any)} className="bg-[#1a1f26] p-5 sm:p-8 rounded-2xl sm:rounded-[2.5rem] border border-white/5 shadow-2xl hover:bg-slate-800/50 transition-all cursor-pointer group hover:scale-[1.02] active:scale-[0.98]">
             <div className="flex justify-between items-start mb-8">
               <div>
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1">{t.activity}</p>

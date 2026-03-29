@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { UserProfile, AIAnalysis, WeeklyMealPlan, Recipe, FitnessGoal, ActivityLevel, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, DailyMealPlan, WorkoutPreferences, HealthInsight, ProgressInsight, DEFAULT_HEALTH_SOURCE_PREFERENCES, CorrelationInsight } from './types';
+import { UserProfile, AIAnalysis, WeeklyMealPlan, Recipe, FitnessGoal, ActivityLevel, NutritionPreferences, WorkoutProgram, ExistingWorkout, WorkoutLog, HealthData, Language, DailyMealPlan, WorkoutPreferences, HealthInsight, ProgressInsight, DEFAULT_HEALTH_SOURCE_PREFERENCES, CorrelationInsight, RecoveryBubble } from './types';
 import Dashboard from './components/Dashboard';
 import NutritionTab from './components/NutritionTab';
 import WorkoutTab from './components/WorkoutTab';
@@ -113,7 +113,7 @@ const App: React.FC = () => {
   const [isDbLoaded, setIsDbLoaded] = useState(false);
   const [settingsModalMode, setSettingsModalMode] = useState<SettingsModalMode>(null);
   const [recoverySummary, setRecoverySummary] = useState<TrainingRecoverySummary | null>(null);
-  const [recoveryInsight, setRecoveryInsight] = useState<string | null>(null);
+  const [recoveryInsight, setRecoveryInsight] = useState<RecoveryBubble[] | null>(null);
   const [correlationInsights, setCorrelationInsights] = useState<CorrelationInsight[] | null>(null);
   const [isAnalyzingRecovery, setIsAnalyzingRecovery] = useState(false);
   const [isAnalyzingCorrelations, setIsAnalyzingCorrelations] = useState(false);

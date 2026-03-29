@@ -918,15 +918,16 @@ export const importManualWorkoutHistory = async (
   return parsedLogs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 };
 
-export const suggestAlternativeExercise = async (profile: UserProfile, exercise: Exercise, lang: Language): Promise<Exercise> => {
-  const prompt = `Schlage eine alternative Übung vor, die die GLEICHEN Muskelgruppen trainiert wie "${exercise.name}" (Equipment: ${exercise.equipment || 'unbekannt'}).
+export const suggestAlternativeExercises = async (profile: UserProfile, exercise: Exercise, lang: Language): Promise<Exercise[]> => {
+  const prompt = `Schlage genau 3 verschiedene alternative Übungen vor, die die GLEICHEN Muskelgruppen trainiert wie "${exercise.name}" (Equipment: ${exercise.equipment || 'unbekannt'}).
 
 WICHTIGE REGELN:
-1. Die Alternative MUSS ein ANDERES Equipment verwenden als "${exercise.equipment || 'unbekannt'}".
-2. Die Alternative muss gleichwertig in Intensität und Trainingsvolumen sein.
+1. Jede Alternative MUSS ein ANDERES Equipment verwenden als "${exercise.equipment || 'unbekannt'}" UND als die anderen Alternativen.
+2. Die Alternativen müssen gleichwertig in Intensität und Trainingsvolumen sein.
 3. Passe Gewicht, Sätze und Wiederholungen an das neue Equipment an (z.B. Langhantel 60kg → Kurzhantel 24kg/Seite).
-4. Gib eine klare Schritt-für-Schritt Anleitung.
-5. Die Übung soll im Fitnessstudio durchführbar sein.
+4. Gib jeweils eine klare Schritt-für-Schritt Anleitung.
+5. Die Übungen sollen im Fitnessstudio durchführbar sein.
+6. Die 3 Alternativen sollen möglichst unterschiedlich sein (verschiedene Bewegungsmuster/Equipment).
 
 Aktuelle Übung: ${exercise.name}, ${exercise.sets} Sätze × ${exercise.reps} Wdh, Gewicht: ${exercise.suggestedWeight || 'k.A.'}, Pause: ${exercise.rest}s
 ${getLangInstruction(lang)}`;
@@ -937,17 +938,20 @@ ${getLangInstruction(lang)}`;
     config: {
       responseMimeType: "application/json",
       responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          name: { type: Type.STRING },
-          sets: { type: Type.NUMBER },
-          reps: { type: Type.STRING },
-          rest: { type: Type.NUMBER },
-          notes: { type: Type.STRING },
-          suggestedWeight: { type: Type.STRING },
-          equipment: { type: Type.STRING },
-          instructions: { type: Type.ARRAY, items: { type: Type.STRING } }
-        },
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            sets: { type: Type.NUMBER },
+            reps: { type: Type.STRING },
+            rest: { type: Type.NUMBER },
+            notes: { type: Type.STRING },
+            suggestedWeight: { type: Type.STRING },
+            equipment: { type: Type.STRING },
+            instructions: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+        }
       }
     }
   }, 3, profile.mockMode, resolveGeminiApiKey(profile), profile);
@@ -1002,6 +1006,47 @@ export interface AdditionalFoodEstimate {
   adjustedMeals?: Partial<DailyMealPlan>;
   advice?: string;
 }
+
+// ── Estimate calories burned from ad-hoc activity ──
+export const estimateActivityCalories = async (
+  profile: UserProfile,
+  activity: string,
+  durationMinutes: number,
+  lang: Language,
+): Promise<{ caloriesBurned: number; activityType: string; summary: string }> => {
+  const prompt = `${getLangInstruction(lang)}
+Schätze den Kalorienverbrauch für folgende Aktivität:
+Aktivität: "${activity}"
+Dauer: ${durationMinutes} Minuten
+Person: ${profile.name}, ${profile.age} Jahre, ${profile.gender}, ${profile.weight || '?'}kg, ${profile.height || '?'}cm, Aktivitätslevel: ${profile.activityLevel}
+
+Antworte NUR als JSON mit:
+- "caloriesBurned": geschätzte verbrannte Kalorien (Zahl)
+- "activityType": standardisierter Aktivitätsname (z.B. "Padel Tennis", "Schwimmen", "Fußball")
+- "summary": kurze Zusammenfassung (1 Satz, ${lang === 'de' ? 'Deutsch' : 'English'})`;
+
+  if (isMockMode() || profile.mockMode) {
+    const mockCals = Math.round(durationMinutes * 7.5);
+    return { caloriesBurned: mockCals, activityType: activity, summary: lang === 'de' ? `${activity} (${durationMinutes} Min.) — ca. ${mockCals} kcal verbrannt` : `${activity} (${durationMinutes} min) — approx. ${mockCals} kcal burned` };
+  }
+
+  const response = await callGeminiWithRetry({
+    model: 'gemini-3-flash-preview',
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          caloriesBurned: { type: Type.NUMBER },
+          activityType: { type: Type.STRING },
+          summary: { type: Type.STRING },
+        },
+      }
+    }
+  }, 3, profile.mockMode, resolveGeminiApiKey(profile), profile);
+  return JSON.parse(extractJson(response.text));
+};
 
 export const estimateAdditionalFood = async (
   profile: UserProfile,
@@ -1434,7 +1479,7 @@ export const analyzeTrainingRecovery = async (
   trend: string,
   profile: UserProfile,
   lang: Language
-): Promise<string> => {
+): Promise<{ icon: string; label: string; value: string; status: 'good' | 'warning' | 'bad' }[]> => {
   const entriesSummary = recoveryEntries
     .slice(-10)
     .map(e => `${e.workoutDate} | ${e.workoutTitle} | Load: ${e.trainingLoad} | Recovery: ${e.recoveryScore} (${e.recoveryStatus})${e.nextDayHRV != null ? ` | HRV: ${e.nextDayHRV}${e.baselineHRV != null ? `/${e.baselineHRV}` : ''}` : ''}${e.nextDaySleepHours != null ? ` | Sleep: ${e.nextDaySleepHours}h` : ''}`)
@@ -1454,19 +1499,28 @@ ZUSAMMENFASSUNG:
 
 NUTZERPROFIL: ${profile.name}, ${profile.age} Jahre, ${profile.gender}, Ziele: ${profile.goals.join(', ')}, Aktivitätslevel: ${profile.activityLevel}
 
-Erstelle eine Analyse mit:
-1. Bewertung des aktuellen Trainings-Erholungs-Verhältnisses
-2. Erkannte Muster (z.B. schlechte Erholung nach bestimmten Trainingsarten)
-3. Konkrete Empfehlungen zur Trainingssteuerung
-4. Tipps zur Verbesserung der Regeneration
-5. Warnzeichen falls Übertraining droht
+Erstelle eine Analyse als JSON-Array mit 4-7 kurzen Insight-Bubbles. Jede Bubble hat:
+- "icon": FontAwesome 6 icon-name (z.B. "fa-heart-pulse", "fa-bed", "fa-fire", "fa-shield", "fa-triangle-exclamation", "fa-dumbbell", "fa-chart-line", "fa-moon", "fa-bolt")
+- "label": Kurzer Titel (max 3 Wörter)
+- "value": Kurze Zusammenfassung (max 15 Wörter, knackig und direkt)
+- "status": "good" (positiv/grün), "warning" (Achtung/gelb) oder "bad" (Problem/rot)
 
-Antworte als zusammenhängender Fließtext (kein JSON), gut strukturiert mit Absätzen.`;
+Kategorien die abgedeckt werden sollen:
+1. Trainings-Erholungs-Verhältnis
+2. Erkannte Muster
+3. Schlafqualität/HRV (falls Daten vorhanden)
+4. Überlastungsrisiko
+5. Konkrete Empfehlung
+
+Antworte NUR mit dem JSON-Array, kein Markdown, kein Fließtext.`;
 
   if (isMockMode() || profile.mockMode) {
-    return lang === 'de'
-      ? `MOCK: Dein durchschnittlicher Recovery Score von ${avgRecoveryScore.toFixed(1)} deutet auf eine ${avgRecoveryScore >= 70 ? 'gute' : avgRecoveryScore >= 50 ? 'moderate' : 'verbesserungswürdige'} Erholung hin. Der Trend ist ${trend}. Achte darauf, nach intensiven Einheiten ausreichend Schlaf und Erholung einzuplanen. Deine Trainingsbelastung von durchschnittlich ${avgTrainingLoad.toFixed(0)} ist ${avgTrainingLoad > 500 ? 'hoch — plane regelmäßige Deload-Wochen ein' : 'im normalen Bereich'}.`
-      : `MOCK: Your average recovery score of ${avgRecoveryScore.toFixed(1)} indicates ${avgRecoveryScore >= 70 ? 'good' : avgRecoveryScore >= 50 ? 'moderate' : 'room for improvement in'} recovery. The trend is ${trend}. Make sure to get enough sleep and rest after intense sessions. Your average training load of ${avgTrainingLoad.toFixed(0)} is ${avgTrainingLoad > 500 ? 'high — consider regular deload weeks' : 'within normal range'}.`;
+    return [
+      { icon: 'fa-heart-pulse', label: lang === 'de' ? 'Recovery Score' : 'Recovery Score', value: lang === 'de' ? `${avgRecoveryScore.toFixed(0)}/100 — ${avgRecoveryScore >= 70 ? 'gute Erholung' : 'Erholung verbessern'}` : `${avgRecoveryScore.toFixed(0)}/100 — ${avgRecoveryScore >= 70 ? 'good recovery' : 'needs improvement'}`, status: avgRecoveryScore >= 70 ? 'good' : avgRecoveryScore >= 50 ? 'warning' : 'bad' },
+      { icon: 'fa-fire', label: lang === 'de' ? 'Belastung' : 'Training Load', value: lang === 'de' ? `Ø ${avgTrainingLoad.toFixed(0)} — ${avgTrainingLoad > 500 ? 'hoch, Deload einplanen' : 'normaler Bereich'}` : `Avg ${avgTrainingLoad.toFixed(0)} — ${avgTrainingLoad > 500 ? 'high, plan deload' : 'normal range'}`, status: avgTrainingLoad > 500 ? 'warning' : 'good' },
+      { icon: 'fa-chart-line', label: lang === 'de' ? 'Trend' : 'Trend', value: lang === 'de' ? `${trend === 'improving' ? 'Aufwärtstrend — weiter so!' : trend === 'declining' ? 'Abwärtstrend — mehr Ruhe' : 'Stabil — gute Basis'}` : `${trend === 'improving' ? 'Improving — keep it up!' : trend === 'declining' ? 'Declining — more rest' : 'Stable — good baseline'}`, status: trend === 'improving' ? 'good' : trend === 'declining' ? 'bad' : 'warning' },
+      { icon: 'fa-bed', label: lang === 'de' ? 'Empfehlung' : 'Recommendation', value: lang === 'de' ? 'Nach intensiven Einheiten 7-9h Schlaf priorisieren' : 'Prioritize 7-9h sleep after intense sessions', status: 'good' },
+    ];
   }
 
   try {
@@ -1482,7 +1536,15 @@ Antworte als zusammenhängender Fließtext (kein JSON), gut strukturiert mit Abs
     if (!rawText) {
       throw new Error("Empty response from AI model");
     }
-    return rawText.trim();
+    const cleaned = rawText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    if (!Array.isArray(parsed)) throw new Error("Expected JSON array");
+    return parsed.map((b: any) => ({
+      icon: String(b.icon || 'fa-circle-info'),
+      label: String(b.label || ''),
+      value: String(b.value || ''),
+      status: ['good', 'warning', 'bad'].includes(b.status) ? b.status : 'warning',
+    }));
   } catch (error: any) {
     console.error("analyzeTrainingRecovery failed:", error);
     const detail = error?.message || String(error);

@@ -73,14 +73,14 @@ const UserProfileForm: React.FC<UserProfileFormProps> = ({ onSubmit, onCancel, l
   };
 
   return (
-    <div className="max-w-3xl mx-auto bg-[#1a1f26]/90 backdrop-blur-3xl rounded-[3.5rem] shadow-[0_50px_100px_rgba(0,0,0,0.4)] overflow-hidden border border-white/5 my-10 animate-fade-in relative transition-all duration-500">
+    <div className="max-w-3xl mx-auto bg-[#1a1f26]/90 backdrop-blur-3xl rounded-[2rem] sm:rounded-[3.5rem] shadow-[0_50px_100px_rgba(0,0,0,0.4)] overflow-hidden border border-white/5 my-6 sm:my-10 animate-fade-in relative transition-all duration-500">
       {/* Premium Accents */}
       <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-transparent via-indigo-600 to-transparent opacity-50"></div>
       
-      <div className="p-10 lg:p-14 border-b border-white/5 flex justify-between items-start">
+      <div className="p-6 sm:p-10 lg:p-14 border-b border-white/5 flex justify-between items-start">
         <div className="space-y-3">
           <p className="text-indigo-500 text-[10px] font-black uppercase tracking-[0.4em] mb-1">Onboarding</p>
-          <h2 className="text-4xl font-black text-white uppercase tracking-tighter leading-none">{t.welcome}</h2>
+          <h2 className="text-2xl sm:text-4xl font-black text-white uppercase tracking-tighter leading-none">{t.welcome}</h2>
           <p className="text-slate-400 font-medium italic text-sm">{t.welcomeSub}</p>
         </div>
         <button 
@@ -91,7 +91,7 @@ const UserProfileForm: React.FC<UserProfileFormProps> = ({ onSubmit, onCancel, l
         </button>
       </div>
 
-      <form onSubmit={handleSubmit} className="p-10 lg:p-14 space-y-12">
+      <form onSubmit={handleSubmit} className="p-6 sm:p-10 lg:p-14 space-y-12">
         {/* Core Credentials */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="space-y-3">
@@ -187,7 +187,7 @@ const UserProfileForm: React.FC<UserProfileFormProps> = ({ onSubmit, onCancel, l
                   key={goal} 
                   type="button" 
                   onClick={() => setProfile(prev => ({ ...prev, goals: prev.goals.includes(goal) ? prev.goals.filter(g => g !== goal) : [...prev.goals, goal] }))} 
-                  className={`px-6 py-4 rounded-2xl border text-[11px] font-black uppercase tracking-widest transition-all ${
+                  className={`px-4 sm:px-6 py-3 sm:py-4 rounded-2xl border text-[11px] font-black uppercase tracking-widest transition-all ${
                     isActive 
                       ? 'bg-indigo-600 border-indigo-500 text-white shadow-[0_10px_30px_rgba(79,70,229,0.3)]' 
                       : 'bg-white/5 border-white/5 text-slate-500 hover:border-white/10 hover:text-slate-300'
@@ -203,7 +203,7 @@ const UserProfileForm: React.FC<UserProfileFormProps> = ({ onSubmit, onCancel, l
         <div className="pt-10">
           <button 
             type="submit" 
-            className="w-full bg-indigo-600 text-white py-8 rounded-[2.5rem] font-black text-2xl hover:bg-indigo-500 transition-all shadow-[0_20px_60px_rgba(79,70,229,0.4)] uppercase tracking-[0.1em] transform hover:-translate-y-1 active:scale-[0.98] border border-indigo-400/20"
+            className="w-full bg-indigo-600 text-white py-5 sm:py-8 rounded-[2rem] sm:rounded-[2.5rem] font-black text-lg sm:text-2xl hover:bg-indigo-500 transition-all shadow-[0_20px_60px_rgba(79,70,229,0.4)] uppercase tracking-[0.1em] transform hover:-translate-y-1 active:scale-[0.98] border border-indigo-400/20"
           >
             {t.submit}
           </button>

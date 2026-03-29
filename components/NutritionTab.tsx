@@ -569,13 +569,13 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
   );
 
   const renderConfig = () => (
-    <div className="bg-[#1a1f26] rounded-[3rem] shadow-2xl p-8 lg:p-12 border border-white/5 space-y-12 animate-fade-in mb-10 overflow-hidden flex flex-col relative">
+    <div className="bg-[#1a1f26] rounded-[1.5rem] sm:rounded-[3rem] shadow-2xl p-5 sm:p-8 lg:p-12 border border-white/5 space-y-12 animate-fade-in mb-10 overflow-hidden flex flex-col relative">
       <div className="absolute top-0 right-0 p-12 opacity-5 text-9xl pointer-events-none translate-x-4"><i className="fas fa-gears text-white"></i></div>
       
       <div className="flex items-center justify-between shrink-0 relative z-10">
         <div>
           <p className="text-orange-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2">Algorithm Settings</p>
-          <h3 className="text-4xl font-black text-white tracking-tighter uppercase">{t.engine}</h3>
+          <h3 className="text-2xl sm:text-4xl font-black text-white tracking-tighter uppercase">{t.engine}</h3>
         </div>
         {weeklyPlan && (
           <button 
@@ -587,9 +587,9 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
         )}
       </div>
       
-      <div className="space-y-12 pr-2 custom-scrollbar relative z-10">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-          <div className="space-y-10">
+      <div className="space-y-6 sm:space-y-12 pr-2 custom-scrollbar relative z-10">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-12">
+          <div className="space-y-6 sm:space-y-10">
             <div className="space-y-5">
               <label className="block text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{t.daysSelect}</label>
               <div className="flex flex-wrap gap-2.5">
@@ -677,7 +677,7 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
             </div>
           </div>
 
-          <div className="space-y-10">
+          <div className="space-y-6 sm:space-y-10">
             <div className="space-y-5">
               <label className="block text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{t.varietyTitle}</label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -728,7 +728,7 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
           </div>
         </div>
 
-        <div className="space-y-8 pt-10 border-t border-white/5">
+        <div className="space-y-8 pt-6 sm:pt-10 border-t border-white/5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-orange-500 text-[10px] font-black uppercase tracking-[0.2em] mb-1">Curation</p>
@@ -738,7 +738,7 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
           </div>
           
           {plannedRecipes.length === 0 ? (
-            <div className="p-12 bg-slate-800/20 rounded-[2.5rem] border-2 border-dashed border-white/5 text-center transition-all hover:bg-slate-800/30">
+            <div className="p-6 sm:p-12 bg-slate-800/20 rounded-[1.5rem] sm:rounded-[2.5rem] border-2 border-dashed border-white/5 text-center transition-all hover:bg-slate-800/30">
               <i className="fas fa-info-circle text-4xl text-slate-700 mb-4"></i>
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest max-w-xs mx-auto leading-relaxed">No recipes selected for manual inclusion. Browse your personal library to add recipes.</p>
             </div>
@@ -767,10 +767,10 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
         </div>
       </div>
 
-      <div className="pt-10 shrink-0 relative z-10">
+      <div className="pt-6 sm:pt-10 shrink-0 relative z-10">
         <button 
           onClick={handleGenerateClick} 
-          className="w-full py-7 bg-orange-600 hover:bg-orange-500 text-white rounded-[2.5rem] font-black text-2xl uppercase tracking-[0.1em] shadow-[0_20px_50px_rgba(234,88,12,0.3)] transition-all active:scale-[0.98] border border-orange-400/20"
+          className="w-full py-5 sm:py-7 bg-orange-600 hover:bg-orange-500 text-white rounded-[2.5rem] font-black text-lg sm:text-2xl uppercase tracking-[0.1em] shadow-[0_20px_50px_rgba(234,88,12,0.3)] transition-all active:scale-[0.98] border border-orange-400/20"
         >
           {t.run}
         </button>
@@ -783,20 +783,20 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
       <div className="flex gap-2 p-1.5 bg-slate-800/40 border border-white/5 backdrop-blur-md rounded-2xl w-fit">
         <button 
           onClick={() => setActiveTab('engine')} 
-          className={`px-8 py-3 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'engine' ? 'bg-orange-600 text-white shadow-xl shadow-orange-600/20' : 'text-slate-500 hover:text-slate-300'}`}
+          className={`px-4 sm:px-8 py-3 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'engine' ? 'bg-orange-600 text-white shadow-xl shadow-orange-600/20' : 'text-slate-500 hover:text-slate-300'}`}
         >
           {t.weeklyPlan}
         </button>
         <button
           onClick={() => setActiveTab('recipes')}
-          className={`px-8 py-3 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'recipes' ? 'bg-orange-600 text-white shadow-xl shadow-orange-600/20' : 'text-slate-500 hover:text-slate-300'}`}
+          className={`px-4 sm:px-8 py-3 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'recipes' ? 'bg-orange-600 text-white shadow-xl shadow-orange-600/20' : 'text-slate-500 hover:text-slate-300'}`}
         >
           {t.favorites}
         </button>
         {(profile?.nutritionHistory?.length || 0) > 0 && (
           <button
             onClick={() => setActiveTab('history')}
-            className={`px-8 py-3 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'history' ? 'bg-orange-600 text-white shadow-xl shadow-orange-600/20' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`px-4 sm:px-8 py-3 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'history' ? 'bg-orange-600 text-white shadow-xl shadow-orange-600/20' : 'text-slate-500 hover:text-slate-300'}`}
           >
             {language === 'de' ? 'Historie' : 'History'}
           </button>
@@ -809,11 +809,11 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
             renderConfig()
           ) : (
             <div className="space-y-8 animate-fade-in">
-              <div className="bg-gradient-to-br from-orange-600 to-orange-700 rounded-[3rem] p-10 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 shadow-2xl border border-orange-400/20 relative overflow-hidden">
+              <div className="bg-gradient-to-br from-orange-600 to-orange-700 rounded-[1.5rem] sm:rounded-[3rem] p-5 sm:p-10 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 shadow-2xl border border-orange-400/20 relative overflow-hidden">
                  <div className="absolute top-0 right-0 p-10 opacity-10 text-9xl pointer-events-none translate-x-4"><i className="fas fa-utensils"></i></div>
                  <div className="relative z-10">
                    <p className="text-orange-200 text-[10px] font-black uppercase tracking-[0.3em] mb-2">Automated Planning</p>
-                   <h3 className="text-4xl font-black tracking-tighter uppercase mb-1">{t.engine}</h3>
+                   <h3 className="text-2xl sm:text-4xl font-black tracking-tighter uppercase mb-1">{t.engine}</h3>
                    <p className="text-orange-100 italic text-sm opacity-80 font-medium">{plannedRecipes.length} recipes manually prioritized</p>
                  </div>
                  <div className="relative z-10 flex flex-wrap gap-2 sm:gap-3 w-full sm:w-auto">
@@ -1293,7 +1293,7 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
                                   <span className="text-xs text-slate-500 line-through">{currentMeal.name}</span>
                                 )}
                               </div>
-                              <div className="flex items-center justify-between ml-[4.5rem]">
+                              <div className="flex items-center justify-between ml-8 sm:ml-[4.5rem]">
                                 <span className="text-sm font-bold text-white flex items-center gap-2">
                                   {isChanged && <i className="fas fa-arrow-right text-indigo-400 text-[8px]"></i>}
                                   {meal.name}
@@ -1340,13 +1340,13 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
       )}
       {activeTab === 'recipes' && (
         <div className="space-y-10 animate-fade-in">
-          <div className="bg-[#1a1f26] rounded-[3rem] p-10 lg:p-14 border border-white/5 shadow-2xl relative overflow-hidden">
+          <div className="bg-[#1a1f26] rounded-[1.5rem] sm:rounded-[3rem] p-5 sm:p-10 lg:p-14 border border-white/5 shadow-2xl relative overflow-hidden">
              <div className="absolute top-0 right-0 p-14 opacity-5 text-9xl pointer-events-none translate-x-4"><i className="fas fa-book-open text-white"></i></div>
              
-             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-14 relative z-10">
+             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8 sm:mb-14 relative z-10">
                <div>
                  <p className="text-orange-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2">Recipe Vault</p>
-                 <h3 className="text-4xl font-black text-white tracking-tighter uppercase">{t.favorites}</h3>
+                 <h3 className="text-2xl sm:text-4xl font-black text-white tracking-tighter uppercase">{t.favorites}</h3>
                </div>
                <div className="flex items-center gap-3 w-full md:w-auto">
                  <div className="relative flex-1 md:w-72 group">
@@ -1383,7 +1383,7 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
                  {sortedFavorites.map((fav, i) => (
                    <div 
                     key={i} 
-                    className={`bg-slate-800/30 hover:bg-slate-800/60 p-5 rounded-[2.5rem] border transition-all flex items-center gap-6 group cursor-pointer ${fav.isPlannedForWeek ? 'border-orange-500/40 bg-orange-500/5' : 'border-white/5'}`} 
+                    className={`bg-slate-800/30 hover:bg-slate-800/60 p-3 sm:p-5 rounded-[1.5rem] sm:rounded-[2.5rem] border transition-all flex items-center gap-3 sm:gap-6 group cursor-pointer ${fav.isPlannedForWeek ? 'border-orange-500/40 bg-orange-500/5' : 'border-white/5'}`} 
                     onClick={() => setSelectedRecipe(fav)}
                    >
                      <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center flex-shrink-0 text-2xl transition-all ${fav.isPlannedForWeek ? 'bg-orange-600 text-white shadow-xl shadow-orange-600/20' : 'bg-slate-700 text-slate-400 group-hover:bg-slate-900 group-hover:text-white'}`}>
@@ -1418,7 +1418,7 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
                      <div className="flex items-center gap-3">
                         <button 
                           onClick={(e) => { e.stopPropagation(); togglePlanned(fav); }} 
-                          className={`h-14 px-8 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 ${fav.isPlannedForWeek ? 'bg-orange-600 text-white shadow-xl shadow-orange-600/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 border border-white/5'}`}
+                          className={`h-12 sm:h-14 px-4 sm:px-8 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 ${fav.isPlannedForWeek ? 'bg-orange-600 text-white shadow-xl shadow-orange-600/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 border border-white/5'}`}
                         >
                           <i className={`fas ${fav.isPlannedForWeek ? 'fa-check text-base' : 'fa-calendar-plus'}`}></i>
                           <span className="hidden sm:inline">{fav.isPlannedForWeek ? 'Planned' : t.planForWeek}</span>
@@ -1851,11 +1851,11 @@ const NutritionTab: React.FC<NutritionTabProps> = ({ weeklyPlan, onGeneratePlan,
       )}
       {activeTab === 'history' && (
         <div className="space-y-8 animate-fade-in">
-          <div className="bg-[#1a1f26] rounded-[3rem] p-10 lg:p-14 border border-white/5 shadow-2xl relative overflow-hidden">
+          <div className="bg-[#1a1f26] rounded-[1.5rem] sm:rounded-[3rem] p-5 sm:p-10 lg:p-14 border border-white/5 shadow-2xl relative overflow-hidden">
             <div className="absolute top-0 right-0 p-14 opacity-5 text-9xl pointer-events-none translate-x-4"><i className="fas fa-clock-rotate-left text-white"></i></div>
-            <div className="relative z-10 mb-10">
+            <div className="relative z-10 mb-6 sm:mb-10">
               <p className="text-orange-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2">{language === 'de' ? 'Vergangene Wochen' : 'Past Weeks'}</p>
-              <h3 className="text-4xl font-black text-white tracking-tighter uppercase">{language === 'de' ? 'Nutrition Historie' : 'Nutrition History'}</h3>
+              <h3 className="text-2xl sm:text-4xl font-black text-white tracking-tighter uppercase">{language === 'de' ? 'Nutrition Historie' : 'Nutrition History'}</h3>
             </div>
 
             {(profile?.nutritionHistory || []).slice().reverse().map((entry, idx) => {

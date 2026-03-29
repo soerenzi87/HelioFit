@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { WorkoutProgram, WorkoutSession, Exercise, ExistingWorkout, WorkoutLog, ExerciseLog, Language, UserProfile, WorkoutPreferences } from '../types';
+import { WorkoutProgram, WorkoutSession, Exercise, ExistingWorkout, WorkoutLog, ExerciseLog, Language, UserProfile, WorkoutPreferences, RecoveryBubble } from '../types';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Bar, BarChart, ComposedChart, Legend, Cell } from 'recharts';
-import { analyzeWorkoutProgress, suggestWorkoutPreferences, generateWorkoutCue, suggestAlternativeExercise, adjustWorkoutSession, WorkoutAdjustmentDraft } from '../services/geminiService';
+import { analyzeWorkoutProgress, suggestWorkoutPreferences, generateWorkoutCue, suggestAlternativeExercises, adjustWorkoutSession, WorkoutAdjustmentDraft, estimateActivityCalories } from '../services/geminiService';
 import { exportWorkoutToICS } from '../services/calendarService';
 import { RecoveryEntry, TrainingRecoverySummary } from '../services/recoveryService';
 import { HealthData } from '../types';
@@ -27,7 +27,7 @@ interface WorkoutTabProps {
   profile: UserProfile | null;
   healthData?: HealthData | null;
   recoverySummary?: TrainingRecoverySummary | null;
-  recoveryInsight?: string | null;
+  recoveryInsight?: RecoveryBubble[] | null;
   onAnalyzeRecovery?: () => void;
   isAnalyzingRecovery?: boolean;
 }
@@ -156,8 +156,16 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
   const touchStartRef = useRef<{ idx: number; startX: number; startY: number } | null>(null);
   const dayButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  // ── NEW: Exercise swap state ──
+  // ── Exercise swap state ──
   const [swappingExIdx, setSwappingExIdx] = useState<number | null>(null);
+  const [swapDrafts, setSwapDrafts] = useState<{ exIdx: number; options: Exercise[] } | null>(null);
+  // ── Ad-hoc activity state ──
+  const [showAdHocModal, setShowAdHocModal] = useState(false);
+  const [adHocActivity, setAdHocActivity] = useState('');
+  const [adHocDuration, setAdHocDuration] = useState(60);
+  const [isEstimatingAdHoc, setIsEstimatingAdHoc] = useState(false);
+  // ── Exercise history state ──
+  const [historyExercise, setHistoryExercise] = useState<string | null>(null);
   // Ref to always have latest currentLog for save (avoids stale closure after exercise swap)
   const currentLogRef = useRef(currentLog);
   currentLogRef.current = currentLog;
@@ -361,38 +369,78 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
   // ── NEW: Swap exercise via AI (with confirmation) ──
   const handleSwapExercise = async (exIdx: number, exercise: Exercise) => {
     if (swappingExIdx !== null) return;
-    const confirmMsg = language === 'de'
-      ? `Möchtest du "${exercise.name}" wirklich durch eine Alternative ersetzen?`
-      : `Do you really want to replace "${exercise.name}" with an alternative?`;
-    if (!window.confirm(confirmMsg)) return;
     setSwappingExIdx(exIdx);
+    setSwapDrafts(null);
     try {
       if (!profile) return;
-      const alternative = await suggestAlternativeExercise(profile, exercise, language);
-      // Update live session data
-      const sessionToUpdate = liveSessionData || selectedSession;
-      if (!sessionToUpdate) return;
-      const newSession = {
-        ...sessionToUpdate,
-        exercises: sessionToUpdate.exercises.map((ex, i) => i === exIdx ? { ...alternative } : ex)
-      };
-      setLiveSessionData(newSession);
-      // Update currentLog to match new exercise
-      const logCopy = [...currentLog];
-      const oldSets = logCopy[exIdx].sets;
-      const newSetCount = alternative.sets || oldSets.length;
-      logCopy[exIdx] = {
-        exerciseName: alternative.name,
-        sets: Array.from({ length: newSetCount }, (_, si) =>
-          si < oldSets.length ? oldSets[si] : { weight: 0, reps: 0 }
-        )
-      };
-      setCurrentLog(logCopy);
+      const options = await suggestAlternativeExercises(profile, exercise, language);
+      setSwapDrafts({ exIdx, options });
     } catch (e) {
-      console.error("Failed to swap exercise:", e);
+      console.error("Failed to fetch alternatives:", e);
     } finally {
       setSwappingExIdx(null);
     }
+  };
+
+  const handlePickSwap = (alternative: Exercise) => {
+    if (!swapDrafts) return;
+    const { exIdx } = swapDrafts;
+    const sessionToUpdate = liveSessionData || selectedSession;
+    if (!sessionToUpdate) return;
+    const newSession = {
+      ...sessionToUpdate,
+      exercises: sessionToUpdate.exercises.map((ex, i) => i === exIdx ? { ...alternative } : ex)
+    };
+    setLiveSessionData(newSession);
+    const logCopy = [...currentLog];
+    const oldSets = logCopy[exIdx].sets;
+    const newSetCount = alternative.sets || oldSets.length;
+    logCopy[exIdx] = {
+      exerciseName: alternative.name,
+      sets: Array.from({ length: newSetCount }, (_, si) =>
+        si < oldSets.length ? oldSets[si] : { weight: 0, reps: 0 }
+      )
+    };
+    setCurrentLog(logCopy);
+    setSwapDrafts(null);
+  };
+
+  // Handle ad-hoc activity submission
+  const handleAddAdHocActivity = async () => {
+    if (!profile || !adHocActivity.trim()) return;
+    setIsEstimatingAdHoc(true);
+    try {
+      const result = await estimateActivityCalories(profile, adHocActivity.trim(), adHocDuration, language);
+      const log: WorkoutLog = {
+        date: new Date().toISOString(),
+        sessionTitle: result.activityType,
+        exercises: [],
+        durationMinutes: adHocDuration,
+        notes: result.summary,
+        caloriesBurned: result.caloriesBurned,
+        isAdHoc: true,
+        activityType: result.activityType,
+      };
+      onSaveLog(log);
+      setShowAdHocModal(false);
+      setAdHocActivity('');
+      setAdHocDuration(60);
+    } catch (e) {
+      console.error("Failed to estimate activity:", e);
+    } finally {
+      setIsEstimatingAdHoc(false);
+    }
+  };
+
+  // Get exercise history from logs
+  const getExerciseHistory = (exerciseName: string) => {
+    return workoutLogs
+      .flatMap(log => log.exercises
+        .filter(ex => ex.exerciseName.toLowerCase() === exerciseName.toLowerCase())
+        .map(ex => ({ date: log.date, sets: ex.sets }))
+      )
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 5);
   };
 
   // Sync local state to profile when it changes to persist across tab switches
@@ -412,7 +460,9 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
   const t = language === 'de' ? {
     plan: 'Trainingsplan', stats: 'Historie & Analyse', setup: 'Workout Engine', configSub: 'Trainingslogik anpassen', create: 'Neuen Plan generieren', adapt: 'Engine öffnen', focus: 'Fokus', start: 'Training starten', save: 'Session speichern', weight: 'Gewicht (kg)', reps: 'Wdh.', rest: 'Pause', export: 'Export', history: 'Wochen-Archiv', plannedVsActual: 'Soll vs. Ist', volume: 'Volumen-Trend', availability: 'Deine verfügbaren Tage', fixed: 'Feste Termine / Kurse', add: 'Termin hinzufügen', activityPlaceholder: 'z.B. Yoga Kurs, Fußball...',
     autoSuggest: 'KI-Vorschlag', suggesting: 'Analysiere Profil...',
-    acceptSuggestion: 'Vorschlag übernehmen', skipSet: 'Nicht gemacht', swapping: 'Alternative wird gesucht...',
+    acceptSuggestion: 'Vorschlag übernehmen', skipSet: 'Nicht gemacht', swapping: 'Alternativen werden gesucht...', pickAlternative: 'Alternative wählen', cancelSwap: 'Abbrechen',
+    addActivity: 'Aktivität hinzufügen', activityName: 'Aktivität (z.B. Padel Tennis, Schwimmen)', duration: 'Dauer (Min)', estimating: 'Kalorien werden geschätzt...', addToHistory: 'Zur Historie hinzufügen', kcalBurned: 'kcal verbrannt',
+    exerciseHistory: 'Übungshistorie', noHistory: 'Noch keine Daten für diese Übung', prevSets: 'Vorherige Sets',
     finishSet: 'Satz beenden', skipped: 'Übersprungen',
     liveSession: 'Live-Session',
     protocol: 'Protokoll',
@@ -465,7 +515,9 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
   } : {
     plan: 'Workout Plan', stats: 'History & Analysis', setup: 'Workout Engine', configSub: 'Adjust training logic', create: 'Generate New Plan', adapt: 'Open Engine', focus: 'Focus', start: 'Start Workout', save: 'Save Session', weight: 'Weight (kg)', reps: 'Reps', rest: 'Rest', export: 'Export', history: 'Weekly Archive', plannedVsActual: 'Planned vs Actual', volume: 'Volume Trend', availability: 'Your available days', fixed: 'Fixed Appointments / Classes', add: 'Add Appointment', activityPlaceholder: 'e.g. Yoga Class, Soccer...',
     autoSuggest: 'AI Suggestion', suggesting: 'Analyzing Profile...',
-    acceptSuggestion: 'Use Suggestion', skipSet: 'Skip Set', swapping: 'Finding alternative...',
+    acceptSuggestion: 'Use Suggestion', skipSet: 'Skip Set', swapping: 'Finding alternatives...', pickAlternative: 'Pick Alternative', cancelSwap: 'Cancel',
+    addActivity: 'Add Activity', activityName: 'Activity (e.g. Padel Tennis, Swimming)', duration: 'Duration (min)', estimating: 'Estimating calories...', addToHistory: 'Add to History', kcalBurned: 'kcal burned',
+    exerciseHistory: 'Exercise History', noHistory: 'No data for this exercise yet', prevSets: 'Previous Sets',
     finishSet: 'Finish Set', skipped: 'Skipped',
     liveSession: 'Live Session',
     protocol: 'Protocol',
@@ -673,10 +725,51 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
           {activeSessionForLive.exercises.map((ex, exIdx) => (
             <div key={exIdx} className="space-y-6 relative group">
               {/* Swap loading overlay */}
-              {swappingExIdx === exIdx && (
-                <div className="absolute -inset-4 bg-slate-900/60 backdrop-blur-md rounded-[3rem] z-20 flex flex-col items-center justify-center gap-4 animate-fade-in border border-white/10 shadow-2xl">
+              {swappingExIdx === exIdx && !swapDrafts && (
+                <div className="absolute -inset-4 bg-slate-900/60 backdrop-blur-md rounded-[2rem] sm:rounded-[3rem] z-20 flex flex-col items-center justify-center gap-4 animate-fade-in border border-white/10 shadow-2xl">
                   <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
                   <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest">{t.swapping}</p>
+                </div>
+              )}
+
+              {/* Swap draft picker overlay */}
+              {swapDrafts && swapDrafts.exIdx === exIdx && (
+                <div className="absolute -inset-4 bg-slate-900/90 backdrop-blur-xl rounded-[2rem] sm:rounded-[3rem] z-20 flex flex-col p-4 sm:p-6 animate-fade-in border border-amber-500/30 shadow-2xl overflow-y-auto max-h-[80vh]">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <i className="fas fa-shuffle text-amber-500 text-sm"></i>
+                      <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest">{t.pickAlternative}</p>
+                    </div>
+                    <button onClick={() => setSwapDrafts(null)} className="w-8 h-8 rounded-xl bg-white/10 hover:bg-red-500/20 text-slate-400 hover:text-red-400 flex items-center justify-center transition-all">
+                      <i className="fas fa-xmark text-xs"></i>
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {swapDrafts.options.map((opt, oi) => (
+                      <button
+                        key={oi}
+                        onClick={() => handlePickSwap(opt)}
+                        className="w-full text-left p-4 rounded-2xl bg-white/5 border border-white/10 hover:border-amber-500/40 hover:bg-amber-500/5 transition-all group/opt"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <h5 className="text-sm sm:text-base font-black text-white uppercase tracking-tight group-hover/opt:text-amber-400 transition-colors">{opt.name}</h5>
+                            <div className="flex flex-wrap items-center gap-2 mt-2">
+                              {opt.equipment && (
+                                <span className="px-2 py-0.5 bg-slate-800 border border-white/10 rounded-lg text-[9px] font-black text-slate-400 uppercase tracking-wider">{opt.equipment}</span>
+                              )}
+                              <span className="text-[10px] font-bold text-slate-500">{opt.sets} × {opt.reps}</span>
+                              {opt.suggestedWeight && <span className="text-[10px] font-bold text-indigo-400">{opt.suggestedWeight}</span>}
+                            </div>
+                            {opt.notes && <p className="text-[11px] text-slate-400 mt-2 leading-snug line-clamp-2">{opt.notes}</p>}
+                          </div>
+                          <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center flex-shrink-0 group-hover/opt:bg-amber-500 group-hover/opt:text-white transition-all">
+                            <i className="fas fa-arrow-right text-xs"></i>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -684,6 +777,13 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                 <div className="flex items-start gap-2">
                   <h3 className="text-lg sm:text-2xl font-black text-white tracking-tight uppercase flex-1 min-w-0 leading-tight">{ex.name}</h3>
                   <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => setHistoryExercise(historyExercise === ex.name ? null : ex.name)}
+                      className={`w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center transition-all border ${historyExercise === ex.name ? 'bg-violet-600/20 text-violet-400 border-violet-500/30' : 'bg-white/5 text-slate-400 border-white/5 hover:bg-violet-600/20 hover:text-violet-400'}`}
+                      title={t.exerciseHistory}
+                    >
+                      <i className="fas fa-chart-line text-[10px] sm:text-xs"></i>
+                    </button>
                     <button
                       onClick={() => setSelectedExerciseInfo(ex)}
                       className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-white/5 text-slate-400 flex items-center justify-center hover:bg-indigo-600/20 hover:text-indigo-400 transition-all border border-white/5"
@@ -707,8 +807,41 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                 )}
               </div>
 
+              {/* Exercise History Panel */}
+              {historyExercise === ex.name && (() => {
+                const history = getExerciseHistory(ex.name);
+                return (
+                  <div className="ml-4 sm:ml-10 p-3 sm:p-4 bg-violet-500/5 border border-violet-500/15 rounded-2xl animate-fade-in">
+                    <div className="flex items-center gap-2 mb-3">
+                      <i className="fas fa-chart-line text-violet-400 text-xs"></i>
+                      <p className="text-[9px] font-black text-violet-400 uppercase tracking-widest">{t.exerciseHistory} — {ex.name}</p>
+                    </div>
+                    {history.length === 0 ? (
+                      <p className="text-xs text-slate-500 italic">{t.noHistory}</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {history.map((h, hi) => (
+                          <div key={hi} className="flex items-center gap-3">
+                            <span className="text-[10px] font-bold text-slate-500 w-16 sm:w-20 shrink-0">
+                              {new Date(h.date).toLocaleDateString(language === 'de' ? 'de-DE' : 'en-US', { day: 'numeric', month: 'short' })}
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {h.sets.filter(s => !s.skipped).map((s, si) => (
+                                <span key={si} className="px-2 py-1 bg-violet-500/10 border border-violet-500/20 rounded-lg text-[10px] font-bold text-violet-300">
+                                  {s.weight > 0 ? `${s.weight}kg` : 'BW'} × {s.reps}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {ex.suggestedWeight && (
-                <div className="flex items-center gap-3 ml-10">
+                <div className="flex items-center gap-3 ml-4 sm:ml-10">
                   <div className="w-2 h-2 bg-amber-500 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.6)]"></div>
                   <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
                     <span className="text-amber-500/80 mr-2">{language === 'de' ? 'Vorschlag' : 'Suggested'}:</span> {ex.suggestedWeight} • {ex.reps} {language === 'de' ? 'Wdh' : 'reps'}
@@ -980,7 +1113,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
               setSaveToast(msg);
               setTimeout(() => setSaveToast(null), 6000);
             }}
-            className="w-full py-8 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2.5rem] font-black text-xl sm:text-2xl uppercase tracking-[0.1em] shadow-[0_20px_50px_rgba(79,70,229,0.3)] transition-all active:scale-[0.98] border border-indigo-400/20 flex items-center justify-center gap-4"
+            className="w-full py-5 sm:py-8 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[1.5rem] sm:rounded-[2.5rem] font-black text-xl sm:text-2xl uppercase tracking-[0.1em] shadow-[0_20px_50px_rgba(79,70,229,0.3)] transition-all active:scale-[0.98] border border-indigo-400/20 flex items-center justify-center gap-4"
           >
             <i className="fas fa-check-circle"></i>
             {language === 'de' ? 'Training beenden' : 'Finish Workout'}
@@ -1064,13 +1197,13 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
       <div className="flex gap-2 p-1.5 bg-slate-800/40 border border-white/5 backdrop-blur-md rounded-2xl w-fit">
         <button 
           onClick={() => setActiveTab('plan')} 
-          className={`px-8 py-3 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'plan' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-300'}`}
+          className={`px-4 sm:px-8 py-2.5 sm:py-3 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'plan' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-300'}`}
         >
           {t.plan}
         </button>
-        <button 
-          onClick={() => setActiveTab('stats')} 
-          className={`px-8 py-3 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'stats' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-300'}`}
+        <button
+          onClick={() => setActiveTab('stats')}
+          className={`px-4 sm:px-8 py-2.5 sm:py-3 rounded-xl font-black text-xs uppercase transition-all ${activeTab === 'stats' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-300'}`}
         >
           {t.stats}
         </button>
@@ -1079,13 +1212,13 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
       {activeTab === 'plan' ? (
         <div className="space-y-8">
           {(!workoutProgram || showConfig) ? (
-            <div className="bg-[#1a1f26] rounded-[3.5rem] shadow-2xl p-8 lg:p-14 border border-white/5 space-y-12 animate-fade-in relative overflow-hidden">
+            <div className="bg-[#1a1f26] rounded-[2rem] sm:rounded-[3.5rem] shadow-2xl p-5 sm:p-8 lg:p-14 border border-white/5 space-y-12 animate-fade-in relative overflow-hidden">
               <div className="absolute top-0 right-0 p-12 opacity-5 text-9xl pointer-events-none translate-x-4"><i className="fas fa-meteor text-white"></i></div>
               
               <div className="flex justify-between items-center relative z-10">
                 <div>
                   <p className="text-indigo-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2">{t.optimizationEngine}</p>
-                  <h3 className="text-4xl font-black text-white tracking-tighter uppercase leading-none">{t.setup}</h3>
+                  <h3 className="text-2xl sm:text-4xl font-black text-white tracking-tighter uppercase leading-none">{t.setup}</h3>
                 </div>
                 {workoutProgram && (
                    <button 
@@ -1131,7 +1264,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                               setAvailableDays(newDays);
                               updatePrefs({ availableDays: newDays });
                             }}
-                            className={`px-6 py-3 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all ${isActive ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-600/20' : 'bg-slate-800/30 border-white/5 text-slate-500 hover:border-white/10'}`}
+                            className={`px-3 sm:px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all ${isActive ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-600/20' : 'bg-slate-800/30 border-white/5 text-slate-500 hover:border-white/10'}`}
                           >
                             {day}
                           </button>
@@ -1146,7 +1279,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                       <select 
                         value={newFixedDay} 
                         onChange={e => setNewFixedDay(e.target.value)} 
-                        className="w-full sm:w-auto p-5 bg-slate-800/50 rounded-2xl border border-white/5 font-bold text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500 appearance-none cursor-pointer"
+                        className="w-full sm:w-auto p-3 sm:p-5 bg-slate-800/50 rounded-2xl border border-white/5 font-bold text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500 appearance-none cursor-pointer"
                       >
                         {daysList.map(d => <option key={d} value={d} className="bg-slate-900">{d}</option>)}
                       </select>
@@ -1155,7 +1288,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                         value={newFixedActivity} 
                         onChange={e => setNewFixedActivity(e.target.value)} 
                         placeholder={t.activityPlaceholder} 
-                        className="flex-1 p-5 bg-slate-800/50 rounded-2xl border border-white/5 font-bold text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-600 transition-all" 
+                        className="flex-1 p-3 sm:p-5 bg-slate-800/50 rounded-2xl border border-white/5 font-bold text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-600 transition-all" 
                       />
                       <button 
                         onClick={() => {
@@ -1166,7 +1299,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                             updatePrefs({ existingWorkouts: newFixed });
                           }
                         }} 
-                        className="w-full sm:w-auto px-8 py-5 bg-white/5 hover:bg-white/10 text-white border border-white/5 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all"
+                        className="w-full sm:w-auto px-6 sm:px-8 py-3 sm:py-5 bg-white/5 hover:bg-white/10 text-white border border-white/5 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all"
                       >
                         {t.add}
                       </button>
@@ -1215,7 +1348,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
               <div className="pt-12 shrink-0 relative z-10">
                 <button
                   onClick={() => { onGenerateWorkout(availableDays, existingWorkouts, sessionDuration); setShowConfig(false); setModificationText(''); setShowModInput(false); }}
-                  className="w-full py-8 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2.5rem] font-black text-2xl uppercase tracking-[0.1em] shadow-[0_20px_50px_rgba(79,70,229,0.3)] transition-all active:scale-[0.98] border border-indigo-400/20"
+                  className="w-full py-5 sm:py-8 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[1.5rem] sm:rounded-[2.5rem] font-black text-lg sm:text-2xl uppercase tracking-[0.1em] shadow-[0_20px_50px_rgba(79,70,229,0.3)] transition-all active:scale-[0.98] border border-indigo-400/20"
                 >
                   {t.create}
                 </button>
@@ -1376,13 +1509,13 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
               </div>
 
               {selectedSession && (
-                <div className="bg-[#1a1f26] rounded-[3.5rem] p-8 lg:p-14 border border-white/5 shadow-2xl animate-scale-in relative overflow-hidden">
+                <div className="bg-[#1a1f26] rounded-[2rem] sm:rounded-[3.5rem] p-5 sm:p-8 lg:p-14 border border-white/5 shadow-2xl animate-scale-in relative overflow-hidden">
                   <div className="absolute top-0 right-0 p-12 opacity-5 text-9xl pointer-events-none translate-x-4"><i className="fas fa-dumbbell text-white"></i></div>
                   
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8 mb-12 pb-10 border-b border-white/5 relative z-10">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sm:gap-8 mb-8 sm:mb-12 pb-6 sm:pb-10 border-b border-white/5 relative z-10">
                     <div>
                       <p className="text-indigo-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2">{selectedSession.focus}</p>
-                      <h3 className="text-4xl font-black text-white tracking-tighter uppercase">{selectedSession.dayTitle}</h3>
+                      <h3 className="text-2xl sm:text-4xl font-black text-white tracking-tighter uppercase">{selectedSession.dayTitle}</h3>
                     </div>
                     <button
                       onClick={() => {
@@ -1392,7 +1525,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                         setSessionNotes('');
                         setCurrentLog(selectedSession.exercises.map(ex => ({ exerciseName: ex.name, sets: Array.from({ length: ex.sets }, () => ({ weight: 0, reps: 0 })) })));
                       }}
-                      className="px-12 py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase text-sm tracking-widest shadow-2xl hover:bg-slate-950 hover:shadow-indigo-500/10 transition-all border border-white/10 flex items-center gap-4 group"
+                      className="px-6 sm:px-12 py-4 sm:py-6 bg-slate-900 text-white rounded-xl sm:rounded-[2rem] font-black uppercase text-sm tracking-widest shadow-2xl hover:bg-slate-950 hover:shadow-indigo-500/10 transition-all border border-white/10 flex items-center gap-4 group"
                     >
                       <i className="fas fa-play text-indigo-500 group-hover:scale-125 transition-transform"></i>
                       {t.start}
@@ -1537,23 +1670,30 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
         </div>
       ) : (
         <div className="space-y-10 animate-fade-in">
-          <div className="bg-[#1a1f26] rounded-[3.5rem] p-10 lg:p-14 border border-white/5 shadow-2xl relative overflow-hidden">
+          <div className="bg-[#1a1f26] rounded-[2rem] sm:rounded-[3.5rem] p-5 sm:p-10 lg:p-14 border border-white/5 shadow-2xl relative overflow-hidden">
              <div className="absolute top-0 right-0 p-14 opacity-5 text-9xl pointer-events-none translate-x-4"><i className="fas fa-chart-line text-white"></i></div>
              
-             <div className="flex justify-between items-center mb-14 relative z-10">
+             <div className="flex justify-between items-center mb-8 sm:mb-14 relative z-10">
                <div>
                   <p className="text-indigo-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2">{t.progressTracker}</p>
-                  <h3 className="text-4xl font-black text-white tracking-tighter uppercase leading-none">{t.stats}</h3>
+                  <h3 className="text-2xl sm:text-4xl font-black text-white tracking-tighter uppercase leading-none">{t.stats}</h3>
                </div>
                <div className="flex items-center gap-3">
                  <button
                    onClick={() => { setManualHistoryError(null); setManualImportMessage(null); setShowImportModal(true); }}
-                   className="w-14 h-14 rounded-2xl bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-300 border border-indigo-500/20 flex items-center justify-center transition-all"
+                   className="w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-300 border border-indigo-500/20 flex items-center justify-center transition-all"
                    title={t.openImport}
                  >
                    <i className="fas fa-file-import"></i>
                  </button>
-                 <div className="px-6 py-3 bg-white/5 border border-white/5 rounded-2xl text-[10px] font-black text-slate-400 uppercase tracking-widest">{workoutLogs.length} {t.sessions}</div>
+                 <button
+                   onClick={() => setShowAdHocModal(true)}
+                   className="w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-300 border border-emerald-500/20 flex items-center justify-center transition-all"
+                   title={t.addActivity}
+                 >
+                   <i className="fas fa-person-running"></i>
+                 </button>
+                 <div className="px-3 sm:px-6 py-2 sm:py-3 bg-white/5 border border-white/5 rounded-2xl text-[10px] font-black text-slate-400 uppercase tracking-widest">{workoutLogs.length} {t.sessions}</div>
                </div>
              </div>
              {manualImportMessage && (
@@ -1573,51 +1713,63 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                    <div key={i} className="space-y-4">
                      <div
                        onClick={() => setExpandedLogIdx(expandedLogIdx === i ? null : i)}
-                       className={`p-6 bg-slate-800/30 border rounded-[2.5rem] flex items-center gap-8 transition-all hover:bg-slate-800/60 cursor-pointer group ${expandedLogIdx === i ? 'border-indigo-500/40 bg-indigo-500/5 ring-1 ring-indigo-500/20 shadow-2xl' : 'border-white/5'}`}
+                       className={`p-4 sm:p-6 bg-slate-800/30 border rounded-2xl sm:rounded-[2.5rem] flex items-center gap-3 sm:gap-8 transition-all hover:bg-slate-800/60 cursor-pointer group ${expandedLogIdx === i ? 'border-indigo-500/40 bg-indigo-500/5 ring-1 ring-indigo-500/20 shadow-2xl' : 'border-white/5'}`}
                      >
-                       <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center flex-shrink-0 text-3xl transition-all ${expandedLogIdx === i ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'bg-slate-700 text-slate-400 group-hover:bg-slate-900 group-hover:text-white'}`}>
-                          <i className="fas fa-check"></i>
+                       <div className={`w-10 h-10 sm:w-16 sm:h-16 rounded-xl sm:rounded-[1.5rem] flex items-center justify-center flex-shrink-0 text-lg sm:text-3xl transition-all ${
+                          log.isAdHoc
+                            ? (expandedLogIdx === i ? 'bg-emerald-600 text-white shadow-xl shadow-emerald-600/20' : 'bg-emerald-900/50 text-emerald-400 group-hover:bg-emerald-800 group-hover:text-white')
+                            : (expandedLogIdx === i ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'bg-slate-700 text-slate-400 group-hover:bg-slate-900 group-hover:text-white')
+                       }`}>
+                          <i className={`fas ${log.isAdHoc ? 'fa-person-running' : 'fa-check'}`}></i>
                        </div>
-                       
+
                        <div className="flex-1 min-w-0">
-                         <h4 className="font-black text-white text-xl tracking-tight uppercase group-hover:text-indigo-400 transition-colors">{log.sessionTitle}</h4>
-                         <div className="flex items-center gap-4 mt-2">
-                           <div className="flex items-center gap-2">
-                             <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full shadow-[0_0_8px_rgba(79,70,229,0.8)]"></div>
-                             <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">{new Date(log.date).toLocaleDateString(language === 'de' ? 'de-DE' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                         <h4 className={`font-black text-white text-sm sm:text-xl tracking-tight uppercase transition-colors truncate ${log.isAdHoc ? 'group-hover:text-emerald-400' : 'group-hover:text-indigo-400'}`}>{log.sessionTitle}</h4>
+                         <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-4 gap-y-0.5 mt-1 sm:mt-2">
+                           <div className="flex items-center gap-1.5">
+                             <div className={`w-1.5 h-1.5 rounded-full shadow-[0_0_8px] ${log.isAdHoc ? 'bg-emerald-500 shadow-emerald-500/80' : 'bg-indigo-500 shadow-indigo-500/80'}`}></div>
+                             <span className="text-[9px] sm:text-[11px] font-black text-slate-400 uppercase tracking-wider sm:tracking-widest">{new Date(log.date).toLocaleDateString(language === 'de' ? 'de-DE' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                            </div>
-                           <span className="text-slate-600 tracking-widest text-[10px]">•</span>
-                           <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">{log.exercises.length} {t.exercises}</span>
+                           <span className="text-slate-600 tracking-widest text-[10px] hidden sm:inline">•</span>
+                           <span className="text-[9px] sm:text-[11px] font-black text-slate-500 uppercase tracking-wider sm:tracking-widest leading-none">{log.exercises.length} {t.exercises}</span>
                            {log.durationMinutes && (
                              <>
-                               <span className="text-slate-600 tracking-widest text-[10px]">•</span>
-                               <span className="text-[11px] font-black text-indigo-400 uppercase tracking-widest leading-none flex items-center gap-1">
+                               <span className="text-slate-600 tracking-widest text-[10px] hidden sm:inline">•</span>
+                               <span className="text-[9px] sm:text-[11px] font-black text-indigo-400 uppercase tracking-wider sm:tracking-widest leading-none flex items-center gap-1">
                                  <i className="fas fa-stopwatch text-[8px]"></i> {log.durationMinutes} min
+                               </span>
+                             </>
+                           )}
+                           {log.caloriesBurned && (
+                             <>
+                               <span className="text-slate-600 tracking-widest text-[10px] hidden sm:inline">•</span>
+                               <span className="text-[9px] sm:text-[11px] font-black text-orange-400 uppercase tracking-wider sm:tracking-widest leading-none flex items-center gap-1">
+                                 <i className="fas fa-fire text-[8px]"></i> {log.caloriesBurned} {t.kcalBurned}
                                </span>
                              </>
                            )}
                          </div>
                        </div>
-                       
-                       <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-white/5 text-slate-500 group-hover:text-white flex items-center justify-center transition-all shadow-xl">
-                         <i className={`fas fa-chevron-${expandedLogIdx === i ? 'up' : 'down'} text-sm`}></i>
+
+                       <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-slate-900 border border-white/5 text-slate-500 group-hover:text-white flex items-center justify-center transition-all shadow-xl flex-shrink-0">
+                         <i className={`fas fa-chevron-${expandedLogIdx === i ? 'up' : 'down'} text-xs sm:text-sm`}></i>
                        </div>
                      </div>
 
                      {expandedLogIdx === i && (
-                       <div className="p-10 bg-slate-900/40 border border-white/5 rounded-[3rem] shadow-inner space-y-10 animate-fade-in mx-6 mb-10 border-t-0 -mt-10 pt-16">
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                       <div className="p-4 sm:p-10 bg-slate-900/40 border border-white/5 rounded-2xl sm:rounded-[3rem] shadow-inner space-y-6 sm:space-y-10 animate-fade-in mx-0 sm:mx-6 mb-6 sm:mb-10 border-t-0 -mt-6 sm:-mt-10 pt-10 sm:pt-16">
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8">
                            {log.exercises.map((el, exi) => (
-                             <div key={exi} className="bg-slate-800/50 p-6 rounded-[2rem] border border-white/5 group/ex">
-                               <div className="flex items-center justify-between mb-6">
-                                 <h5 className="font-black text-white text-base tracking-tight uppercase flex items-center gap-3">
-                                   <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full shadow-[0_0_8px_rgba(79,70,229,0.5)]"></span>
-                                   {el.exerciseName}
+                             <div key={exi} className="bg-slate-800/50 p-4 sm:p-6 rounded-xl sm:rounded-[2rem] border border-white/5 group/ex">
+                               <div className="flex items-center justify-between mb-3 sm:mb-6">
+                                 <h5 className="font-black text-white text-xs sm:text-base tracking-tight uppercase flex items-center gap-2 sm:gap-3">
+                                   <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 bg-indigo-600 rounded-full shadow-[0_0_8px_rgba(79,70,229,0.5)] flex-shrink-0"></span>
+                                   <span className="break-words">{el.exerciseName}</span>
                                  </h5>
                                </div>
-                               <div className="flex flex-wrap gap-2">
+                               <div className="flex flex-wrap gap-1.5 sm:gap-2">
                                  {el.sets.map((s, si) => (
-                                   <div key={si} className={`px-4 py-3 border rounded-2xl flex flex-col items-center min-w-[70px] transition-all transform hover:scale-105 ${
+                                   <div key={si} className={`px-2.5 sm:px-4 py-2 sm:py-3 border rounded-xl sm:rounded-2xl flex flex-col items-center min-w-[55px] sm:min-w-[70px] transition-all transform hover:scale-105 ${
                                      s.skipped
                                        ? 'bg-red-500/10 border-red-500/20'
                                        : 'bg-slate-900 border-white/5'
@@ -1665,27 +1817,27 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
         </div>
 
         {!recoverySummary || recoverySummary.entries.length === 0 ? (
-          <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-8 text-center">
+          <div className="rounded-2xl sm:rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-8 text-center">
             <i className="fas fa-heart-circle-check text-slate-600 text-3xl mb-4"></i>
             <p className="text-sm text-slate-500 font-medium">{t.noRecoveryData}</p>
           </div>
         ) : (
           <>
             {/* Recovery Overview Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Avg Recovery Score */}
-              <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
+              <div className="rounded-2xl sm:rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
                 <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-2">{t.avgRecovery}</p>
                 <p className="text-3xl font-black text-white">{Math.round(recoverySummary.avgRecoveryScore)}</p>
                 <p className="text-[10px] text-slate-500 font-bold mt-1">/ 100</p>
               </div>
               {/* Avg Training Load */}
-              <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
+              <div className="rounded-2xl sm:rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
                 <p className="text-[9px] font-black text-orange-400 uppercase tracking-widest mb-2">{t.avgLoad}</p>
                 <p className="text-3xl font-black text-white">{Math.round(recoverySummary.avgTrainingLoad)}</p>
               </div>
               {/* Trend */}
-              <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
+              <div className="rounded-2xl sm:rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">{t.trend}</p>
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">
@@ -1697,7 +1849,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                 </div>
               </div>
               {/* Load/Recovery Ratio */}
-              <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
+              <div className="rounded-2xl sm:rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
                 <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2">{t.loadRatio}</p>
                 <p className={`text-3xl font-black ${recoverySummary.loadToRecoveryRatio <= 1.2 ? 'text-emerald-400' : recoverySummary.loadToRecoveryRatio <= 1.8 ? 'text-yellow-400' : 'text-red-400'}`}>
                   {recoverySummary.loadToRecoveryRatio.toFixed(2)}
@@ -1706,7 +1858,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
             </div>
 
             {/* Recovery Timeline Chart */}
-            <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
+            <div className="rounded-2xl sm:rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6">
               <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-4">{t.trainingLoad} / {t.recoveryScore}</p>
               <ResponsiveContainer width="100%" height={220}>
                 <ComposedChart data={recoverySummary.entries.slice(-14).map(e => ({
@@ -1726,7 +1878,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
             </div>
 
             {/* Recent Recovery Entries */}
-            <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6 space-y-3">
+            <div className="rounded-2xl sm:rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6 space-y-3">
               <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2">{t.recoveryScore} — {language === 'de' ? 'Letzte Einträge' : 'Recent Entries'}</p>
               {recoverySummary.entries.slice(-5).reverse().map((entry, idx) => (
                 <div key={idx} className="flex items-center justify-between gap-3 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
@@ -1764,16 +1916,40 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
               ))}
             </div>
 
-            {/* AI Insight */}
-            <div className="rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6 space-y-4">
-              {recoveryInsight && (
-                <div className="p-5 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl">
-                  <div className="flex items-center gap-2 mb-3">
+            {/* AI Insight Bubbles */}
+            <div className="rounded-2xl sm:rounded-[2.5rem] bg-[#0f172a]/60 border border-white/10 p-6 space-y-4">
+              {recoveryInsight && recoveryInsight.length > 0 && (
+                <>
+                  <div className="flex items-center gap-2 mb-1">
                     <i className="fas fa-brain text-indigo-400 text-xs"></i>
-                    <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">AI Insight</p>
+                    <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">AI Recovery Insight</p>
                   </div>
-                  <p className="text-sm text-slate-300 font-medium leading-relaxed whitespace-pre-wrap">{recoveryInsight}</p>
-                </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {recoveryInsight.map((bubble, bi) => {
+                      const statusStyles = bubble.status === 'good'
+                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                        : bubble.status === 'bad'
+                        ? 'bg-red-500/10 border-red-500/20 text-red-400'
+                        : 'bg-amber-500/10 border-amber-500/20 text-amber-400';
+                      const iconBg = bubble.status === 'good'
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : bubble.status === 'bad'
+                        ? 'bg-red-500/20 text-red-400'
+                        : 'bg-amber-500/20 text-amber-400';
+                      return (
+                        <div key={bi} className={`p-4 rounded-2xl border flex items-start gap-3 ${statusStyles}`}>
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${iconBg}`}>
+                            <i className={`fas ${bubble.icon} text-sm`}></i>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-black uppercase tracking-wider opacity-70 mb-0.5">{bubble.label}</p>
+                            <p className="text-xs font-bold text-slate-200 leading-snug">{bubble.value}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               )}
               {onAnalyzeRecovery && (
                 <button
@@ -1790,18 +1966,81 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
         )}
       </div>
 
+      {showAdHocModal && (
+        <div className="fixed inset-0 z-[300] bg-[#0f172a]/80 backdrop-blur-xl flex items-center justify-center p-2 sm:p-6 animate-fade-in">
+          <div className="bg-[#1a1f26] rounded-[2rem] sm:rounded-[3.5rem] p-5 sm:p-8 lg:p-12 max-w-lg w-full shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10 relative">
+            <button
+              onClick={() => { setShowAdHocModal(false); setAdHocActivity(''); setAdHocDuration(60); }}
+              className="absolute top-5 right-5 sm:top-8 sm:right-8 w-12 h-12 rounded-2xl bg-white/5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 flex items-center justify-center transition-all border border-white/5"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+            <div className="space-y-4 mb-6">
+              <p className="text-emerald-500 text-[10px] font-black uppercase tracking-[0.3em]">{t.addActivity}</p>
+              <h4 className="text-xl sm:text-3xl font-black text-white tracking-tight uppercase">
+                <i className="fas fa-person-running mr-3 text-emerald-400"></i>
+                {t.addActivity}
+              </h4>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-2 uppercase tracking-wider font-bold">{t.activityName}</label>
+                <input
+                  type="text"
+                  value={adHocActivity}
+                  onChange={(e) => setAdHocActivity(e.target.value)}
+                  placeholder="Padel Tennis, Schwimmen, Fußball..."
+                  className="w-full rounded-xl sm:rounded-2xl border border-white/10 bg-slate-900/60 px-5 py-4 text-sm text-white outline-none transition-all focus:border-emerald-500 placeholder:text-slate-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-2 uppercase tracking-wider font-bold">{t.duration}</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={10}
+                    max={180}
+                    step={5}
+                    value={adHocDuration}
+                    onChange={(e) => setAdHocDuration(Number(e.target.value))}
+                    className="flex-1 accent-emerald-500"
+                  />
+                  <span className="text-white font-black text-lg min-w-[4rem] text-center">{adHocDuration} min</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-4 pt-2">
+                <button
+                  onClick={() => { setShowAdHocModal(false); setAdHocActivity(''); setAdHocDuration(60); }}
+                  className="px-6 py-4 bg-white/5 hover:bg-white/10 text-white rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest border border-white/10"
+                >
+                  {t.close}
+                </button>
+                <button
+                  onClick={handleAddAdHocActivity}
+                  disabled={isEstimatingAdHoc || adHocActivity.trim().length === 0}
+                  className="px-8 py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-400 text-white rounded-[1.5rem] font-black uppercase text-[10px] tracking-widest transition-all border border-emerald-400/20"
+                >
+                  <i className="fas fa-fire mr-2"></i>
+                  {isEstimatingAdHoc ? t.estimating : t.addToHistory}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showImportModal && (
-        <div className="fixed inset-0 z-[300] bg-[#0f172a]/80 backdrop-blur-xl flex items-center justify-center p-6 animate-fade-in">
-          <div className="bg-[#1a1f26] rounded-[3.5rem] p-8 lg:p-12 max-w-3xl w-full shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10 relative">
+        <div className="fixed inset-0 z-[300] bg-[#0f172a]/80 backdrop-blur-xl flex items-center justify-center p-2 sm:p-6 animate-fade-in">
+          <div className="bg-[#1a1f26] rounded-[2rem] sm:rounded-[3.5rem] p-5 sm:p-8 lg:p-12 max-w-3xl w-full shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10 relative">
             <button
               onClick={() => setShowImportModal(false)}
-              className="absolute top-8 right-8 w-12 h-12 rounded-2xl bg-white/5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 flex items-center justify-center transition-all border border-white/5"
+              className="absolute top-5 right-5 sm:top-8 sm:right-8 w-12 h-12 rounded-2xl bg-white/5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 flex items-center justify-center transition-all border border-white/5"
             >
               <i className="fas fa-times"></i>
             </button>
             <div className="space-y-4 mb-6">
               <p className="text-indigo-500 text-[10px] font-black uppercase tracking-[0.3em]">{t.importedHistorySummary}</p>
-              <h4 className="text-3xl font-black text-white tracking-tight uppercase">{t.manualHistoryTitle}</h4>
+              <h4 className="text-xl sm:text-3xl font-black text-white tracking-tight uppercase">{t.manualHistoryTitle}</h4>
               <p className="text-sm text-slate-400">{t.manualHistorySubtitle}</p>
             </div>
             <div className="space-y-4">
@@ -1809,7 +2048,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                 value={manualHistoryText}
                 onChange={(e) => setManualHistoryText(e.target.value)}
                 placeholder={t.manualHistoryPlaceholder}
-                className="w-full min-h-[220px] rounded-[2rem] border border-white/10 bg-slate-900/60 p-6 text-sm text-white outline-none transition-all focus:border-indigo-500 placeholder:text-slate-600"
+                className="w-full min-h-[220px] rounded-xl sm:rounded-[2rem] border border-white/10 bg-slate-900/60 p-6 text-sm text-white outline-none transition-all focus:border-indigo-500 placeholder:text-slate-600"
               />
               <div className="flex items-center justify-between gap-4">
                 <button

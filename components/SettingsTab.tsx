@@ -393,7 +393,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
           <div className="space-y-3">
             <p className="text-indigo-500 text-[10px] font-black uppercase tracking-[0.4em] mb-1">{t.configuration}</p>
-            <h2 className="text-6xl font-black text-white tracking-tighter uppercase leading-none">{t.title}</h2>
+            <h2 className="text-4xl sm:text-6xl font-black text-white tracking-tighter uppercase leading-none">{t.title}</h2>
             <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-xs">{t.subtitle}</p>
           </div>
           <div className="flex items-center gap-4">
@@ -405,7 +405,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
         </div>
       )}
 
-      {showProfileSection && <div className="bg-[#1a1f26]/80 backdrop-blur-3xl rounded-[3.5rem] p-10 lg:p-14 shadow-[0_50px_100px_rgba(0,0,0,0.5)] border border-white/5 relative overflow-hidden group">
+      {showProfileSection && <div className="bg-[#1a1f26]/80 backdrop-blur-3xl rounded-[2rem] sm:rounded-[3.5rem] p-6 sm:p-10 lg:p-14 shadow-[0_50px_100px_rgba(0,0,0,0.5)] border border-white/5 relative overflow-hidden group">
         <div className="absolute top-0 right-0 p-12 opacity-5 text-[15rem] pointer-events-none translate-x-12 -translate-y-12 group-hover:text-indigo-500 transition-colors">
           <i className="fas fa-user-gear"></i>
         </div>
@@ -413,20 +413,20 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-8 mb-16 relative z-10">
           <div className="space-y-4">
             <span className="px-4 py-2 bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 rounded-xl text-[10px] font-black uppercase tracking-widest">{t.securityLevel}</span>
-            <h3 className="text-4xl font-black text-white tracking-tight uppercase leading-none">{t.profileCard}</h3>
+            <h3 className="text-2xl sm:text-4xl font-black text-white tracking-tight uppercase leading-none">{t.profileCard}</h3>
           </div>
           <button 
             onClick={handleUpdateProfile}
-            className="w-full lg:w-auto px-12 py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black uppercase tracking-[0.1em] text-sm transition-all shadow-[0_20px_50px_rgba(79,70,229,0.3)] active:scale-95 border border-indigo-400/20"
+            className="w-full lg:w-auto px-8 sm:px-12 py-4 sm:py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black uppercase tracking-[0.1em] text-sm transition-all shadow-[0_20px_50px_rgba(79,70,229,0.3)] active:scale-95 border border-indigo-400/20"
           >
             <i className="fas fa-save mr-3"></i> {t.saveProfile}
           </button>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-16 relative z-10">
+        <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-8 sm:gap-12 xl:gap-16 relative z-10">
           {/* Profile Picture Column */}
           <div className="space-y-8">
-            <div className="aspect-square bg-slate-900 rounded-[3rem] flex items-center justify-center overflow-hidden border border-white/5 shadow-2xl group relative cursor-pointer" onClick={() => profilePicRef.current?.click()}>
+            <div className="aspect-square bg-slate-900 rounded-[2rem] sm:rounded-[3rem] flex items-center justify-center overflow-hidden border border-white/5 shadow-2xl group relative cursor-pointer" onClick={() => profilePicRef.current?.click()}>
               {editProfile.profilePicture ? (
                 <img src={editProfile.profilePicture} alt="Profile" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
               ) : (
@@ -439,7 +439,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
                 <p className="text-white text-[10px] font-black uppercase tracking-widest">{t.uploadPic}</p>
               </div>
             </div>
-            <div className="p-6 bg-white/5 border border-white/5 rounded-[2rem] space-y-4">
+            <div className="p-6 bg-white/5 border border-white/5 rounded-2xl sm:rounded-[2rem] space-y-4">
                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
                  <i className="fas fa-circle-info text-indigo-500"></i> {t.identityVerification}
                </p>
@@ -540,7 +540,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
                     <button 
                       key={goal} 
                       onClick={() => setEditProfile(prev => ({ ...prev, goals: prev.goals.includes(goal) ? prev.goals.filter(g => g !== goal) : [...prev.goals, goal] }))}
-                      className={`px-8 py-4 rounded-[1.5rem] border text-[11px] font-black uppercase tracking-widest transition-all ${isActive ? 'bg-indigo-600 border-indigo-500 text-white shadow-[0_15px_40px_rgba(79,70,229,0.4)]' : 'bg-slate-900 border-white/5 text-slate-500 hover:border-white/20 hover:text-slate-300'}`}
+                      className={`px-5 sm:px-8 py-3 sm:py-4 rounded-xl sm:rounded-[1.5rem] border text-[11px] font-black uppercase tracking-widest transition-all ${isActive ? 'bg-indigo-600 border-indigo-500 text-white shadow-[0_15px_40px_rgba(79,70,229,0.4)]' : 'bg-slate-900 border-white/5 text-slate-500 hover:border-white/20 hover:text-slate-300'}`}
                     >
                       {t.goalsMap[goal]}
                     </button>
@@ -553,7 +553,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
       </div>}
 
       {showTechnicalSection && profile.mockMode && (
-        <div className="bg-amber-500/10 border border-amber-500/20 rounded-[2.5rem] p-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
           <div className="flex items-center gap-6">
             <div className="w-14 h-14 bg-amber-500/20 rounded-2xl flex items-center justify-center text-amber-500 text-xl shrink-0">
               <i className="fas fa-flask"></i>
@@ -582,7 +582,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
 
       {showTechnicalSection && !profile.mockMode && <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
         {/* ── AI CONNECTIONS ────────────────────────────────────────────── */}
-        <div className="bg-[#1a1f26]/80 backdrop-blur-3xl p-10 lg:p-14 rounded-[3.5rem] border border-white/5 shadow-2xl space-y-12 relative overflow-hidden">
+        <div className="bg-[#1a1f26]/80 backdrop-blur-3xl p-6 sm:p-10 lg:p-14 rounded-[2rem] sm:rounded-[3.5rem] border border-white/5 shadow-2xl space-y-12 relative overflow-hidden">
           <div className="absolute top-0 right-0 p-10 opacity-5 text-9xl pointer-events-none translate-x-6">
             <i className="fas fa-brain text-white"></i>
           </div>
@@ -723,7 +723,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
         </div>
 
         {/* ── DATA SOURCES / SYNC ───────────────────────────────────────── */}
-        <div className="bg-[#1a1f26]/80 backdrop-blur-3xl p-10 lg:p-14 rounded-[3.5rem] border border-white/5 shadow-2xl space-y-12 relative overflow-hidden">
+        <div className="bg-[#1a1f26]/80 backdrop-blur-3xl p-6 sm:p-10 lg:p-14 rounded-[2rem] sm:rounded-[3.5rem] border border-white/5 shadow-2xl space-y-12 relative overflow-hidden">
           <div className="absolute top-0 right-0 p-10 opacity-5 text-9xl pointer-events-none translate-x-6">
             <i className="fas fa-satellite-dish text-white"></i>
           </div>
@@ -819,7 +819,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {/* Apple Health Small */}
-              <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 flex items-center justify-between group hover:border-white/20 transition-all">
+              <div className="bg-slate-900/50 p-5 sm:p-8 rounded-2xl sm:rounded-[2.5rem] border border-white/5 flex items-center justify-between group hover:border-white/20 transition-all">
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center text-slate-900 text-2xl"><i className="fab fa-apple"></i></div>
                   <div>
@@ -833,7 +833,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
               </div>
 
                {/* Google Fit Small */}
-               <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 flex items-center justify-between group hover:border-emerald-500/20 transition-all">
+               <div className="bg-slate-900/50 p-5 sm:p-8 rounded-2xl sm:rounded-[2.5rem] border border-white/5 flex items-center justify-between group hover:border-emerald-500/20 transition-all">
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center text-emerald-500 text-2xl border border-white/5"><i className="fab fa-google text-emerald-500"></i></div>
                   <div>
@@ -849,7 +849,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
               </div>
             </div>
 
-            <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-white/5 space-y-6">
+            <div className="bg-slate-900 p-5 sm:p-8 rounded-2xl sm:rounded-[2.5rem] border border-white/5 space-y-6">
               <div>
                 <p className="text-cyan-400 text-[10px] font-black uppercase tracking-[0.3em] mb-2">{t.sourcePriorityTitle}</p>
                 <h4 className="text-xl font-black text-white uppercase tracking-tight">{t.sourcePriorityTitle}</h4>
@@ -914,7 +914,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
             </div>
 
             {/* ── PUSH NOTIFICATIONS ── */}
-            <div className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 space-y-6">
+            <div className="bg-white/5 border border-white/10 rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-8 space-y-6">
               <div className="flex items-center gap-3 sm:gap-5 min-w-0">
                 <div className="w-10 h-10 sm:w-14 sm:h-14 bg-amber-500/15 rounded-2xl flex items-center justify-center text-amber-400 text-lg sm:text-xl shrink-0">
                   <i className="fas fa-bell"></i>
@@ -1030,7 +1030,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
               )}
             </div>
 
-            <div className="bg-red-500/10 border border-red-500/20 rounded-[2.5rem] p-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+            <div className="bg-red-500/10 border border-red-500/20 rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
               <div className="flex items-center gap-5">
                 <div className="w-14 h-14 bg-red-500/15 rounded-2xl flex items-center justify-center text-red-400 text-xl shrink-0">
                   <i className="fas fa-triangle-exclamation"></i>
