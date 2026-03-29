@@ -16,7 +16,8 @@ export interface RecoveryEntry {
   baselineRestingHR?: number;
   baselineSleepHours?: number;
   recoveryScore: number;
-  recoveryStatus: 'optimal' | 'adequate' | 'insufficient';
+  recoveryStatus: 'optimal' | 'adequate' | 'insufficient' | 'pending';
+  pending?: boolean;    // true when health data for next day is not yet available
 }
 
 export interface TrainingRecoverySummary {
@@ -106,7 +107,7 @@ export function computeTrainingLoad(log: WorkoutLog): number {
  * When a component's data is missing its weight is redistributed proportionally
  * among the remaining components. Returns 50 when no data is available at all.
  */
-export function computeRecoveryScore(entry: Partial<RecoveryEntry>): number {
+export function computeRecoveryScore(entry: Partial<RecoveryEntry>): number | null {
   const components: { value: number; weight: number }[] = [];
 
   // HRV recovery
@@ -144,7 +145,7 @@ export function computeRecoveryScore(entry: Partial<RecoveryEntry>): number {
     });
   }
 
-  if (components.length === 0) return 50; // no data fallback
+  if (components.length === 0) return null; // no health data yet → pending
 
   const totalWeight = components.reduce((s, c) => s + c.weight, 0);
   const score = components.reduce(
@@ -157,8 +158,9 @@ export function computeRecoveryScore(entry: Partial<RecoveryEntry>): number {
 
 /** Map a numeric recovery score to a status label. */
 function scoreToStatus(
-  score: number,
-): 'optimal' | 'adequate' | 'insufficient' {
+  score: number | null,
+): 'optimal' | 'adequate' | 'insufficient' | 'pending' {
+  if (score === null) return 'pending';
   if (score >= 75) return 'optimal';
   if (score >= 50) return 'adequate';
   return 'insufficient';
@@ -226,7 +228,8 @@ export function computeRecoveryEntries(
       baselineSleepHours,
     };
 
-    const recoveryScore = computeRecoveryScore(partial);
+    const rawScore = computeRecoveryScore(partial);
+    const isPending = rawScore === null;
 
     return {
       workoutDate,
@@ -241,8 +244,9 @@ export function computeRecoveryEntries(
       baselineHRV,
       baselineRestingHR,
       baselineSleepHours,
-      recoveryScore,
-      recoveryStatus: scoreToStatus(recoveryScore),
+      recoveryScore: rawScore ?? 0,
+      recoveryStatus: scoreToStatus(rawScore),
+      pending: isPending,
     };
   });
 }
@@ -267,19 +271,23 @@ export function computeRecoverySummary(
     };
   }
 
-  const avgRecoveryScore =
-    entries.reduce((s, e) => s + e.recoveryScore, 0) / entries.length;
+  // Only use entries with actual health data for averages/trend
+  const scored = entries.filter((e) => !e.pending);
+
+  const avgRecoveryScore = scored.length > 0
+    ? scored.reduce((s, e) => s + e.recoveryScore, 0) / scored.length
+    : 0;
   const avgTrainingLoad =
     entries.reduce((s, e) => s + e.trainingLoad, 0) / entries.length;
   const loadToRecoveryRatio =
     avgRecoveryScore > 0 ? avgTrainingLoad / avgRecoveryScore : 0;
 
-  // Trend detection
+  // Trend detection (only from scored entries)
   let trend: 'improving' | 'stable' | 'declining' = 'stable';
-  if (entries.length >= 2) {
-    const mid = Math.floor(entries.length / 2);
-    const firstHalf = entries.slice(0, mid);
-    const secondHalf = entries.slice(mid);
+  if (scored.length >= 2) {
+    const mid = Math.floor(scored.length / 2);
+    const firstHalf = scored.slice(0, mid);
+    const secondHalf = scored.slice(mid);
 
     const avgFirst =
       firstHalf.reduce((s, e) => s + e.recoveryScore, 0) / firstHalf.length;

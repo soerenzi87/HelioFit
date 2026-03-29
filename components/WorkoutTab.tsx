@@ -536,6 +536,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
     optimal: 'Optimal',
     adequate: 'Ausreichend',
     insufficient: 'Unzureichend',
+    pending: 'Sync ausstehend',
     loadRatio: 'Load/Recovery',
     analyzeRecovery: 'Recovery analysieren',
     analyzingRecovery: 'Analysiere...',
@@ -591,6 +592,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
     optimal: 'Optimal',
     adequate: 'Adequate',
     insufficient: 'Insufficient',
+    pending: 'Sync pending',
     loadRatio: 'Load/Recovery',
     analyzeRecovery: 'Analyze Recovery',
     analyzingRecovery: 'Analyzing...',
@@ -877,7 +879,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 ml-0 sm:ml-6 md:ml-10">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 ml-0 sm:ml-6 md:ml-10">
                 {currentLog[exIdx]?.sets.map((set, sIdx) => {
                   const isDone = set.done === true;
                   const isSkipped = set.skipped === true;
@@ -906,9 +908,9 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                               value={set.weight || ''}
                               disabled={isSkipped || isDone}
                               onChange={(e) => { const copy = [...currentLog]; copy[exIdx].sets[sIdx].weight = parseFloat(e.target.value) || 0; setCurrentLog(copy); }}
-                              className={`w-full bg-slate-900/50 rounded-xl p-3 pr-9 sm:p-4 sm:pr-10 outline-none font-black text-base sm:text-xl transition-all ${isSkipped ? 'text-red-300 border border-red-500/10' : isDone ? 'text-emerald-300 border border-emerald-500/10' : 'text-white border border-white/5 focus:border-indigo-500 focus:bg-slate-900'}`}
+                              className={`w-full bg-slate-900/50 rounded-xl py-3 pl-3 pr-8 sm:py-4 sm:pl-4 sm:pr-10 outline-none font-black text-base sm:text-xl transition-all ${isSkipped ? 'text-red-300 border border-red-500/10' : isDone ? 'text-emerald-300 border border-emerald-500/10' : 'text-white border border-white/5 focus:border-indigo-500 focus:bg-slate-900'}`}
                             />
-                            <span className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 text-[9px] sm:text-[10px] font-black text-slate-600 uppercase">kg</span>
+                            <span className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 text-[9px] sm:text-[10px] font-black text-slate-600 uppercase">kg</span>
                           </div>
                         </div>
                         ) : (
@@ -1902,7 +1904,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                 <ComposedChart data={recoverySummary.entries.slice(-14).map(e => ({
                   date: e.workoutDate.slice(5),
                   load: Math.round(e.trainingLoad),
-                  recovery: Math.round(e.recoveryScore),
+                  recovery: e.pending ? undefined : Math.round(e.recoveryScore),
                 }))}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 800 }} tickLine={false} axisLine={false} />
@@ -1933,19 +1935,27 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                     <span className="px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-[10px] font-black text-orange-400">
                       {Math.round(entry.trainingLoad)}
                     </span>
-                    <span className={`px-3 py-1 rounded-full border text-[10px] font-black ${
-                      entry.recoveryScore >= 75 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
-                      entry.recoveryScore >= 50 ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400' :
-                      'bg-red-500/10 border-red-500/20 text-red-400'
-                    }`}>
-                      {Math.round(entry.recoveryScore)}
-                    </span>
+                    {entry.pending ? (
+                      <span className="px-3 py-1 rounded-full bg-slate-500/10 border border-slate-500/20 text-[10px] font-black text-slate-400">
+                        <i className="fas fa-clock mr-1"></i>—
+                      </span>
+                    ) : (
+                      <span className={`px-3 py-1 rounded-full border text-[10px] font-black ${
+                        entry.recoveryScore >= 75 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                        entry.recoveryScore >= 50 ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400' :
+                        'bg-red-500/10 border-red-500/20 text-red-400'
+                      }`}>
+                        {Math.round(entry.recoveryScore)}
+                      </span>
+                    )}
                     <span className={`text-[9px] font-black uppercase tracking-wider ${
+                      entry.recoveryStatus === 'pending' ? 'text-slate-500' :
                       entry.recoveryStatus === 'optimal' ? 'text-emerald-400' :
                       entry.recoveryStatus === 'adequate' ? 'text-yellow-400' :
                       'text-red-400'
                     }`}>
-                      {entry.recoveryStatus === 'optimal' ? t.optimal :
+                      {entry.recoveryStatus === 'pending' ? t.pending :
+                       entry.recoveryStatus === 'optimal' ? t.optimal :
                        entry.recoveryStatus === 'adequate' ? t.adequate :
                        t.insufficient}
                     </span>
