@@ -48,6 +48,15 @@ const extractDayName = (dayTitle: string): string => {
   return shortMap[full] || full.slice(0, 2);
 };
 
+const isBodyweightExercise = (ex: Exercise): boolean => {
+  const sw = (ex.suggestedWeight || '').toLowerCase();
+  const eq = (ex.equipment || '').toLowerCase();
+  const nm = ex.name.toLowerCase();
+  if (['körpergewicht', 'bodyweight', 'bw'].some(t => sw.includes(t))) return true;
+  if (['ohne', 'bodyweight', 'körpergewicht', 'none'].some(t => eq === t)) return true;
+  return ['plank', 'dip', 'klimm', 'pull-up', 'pullup', 'chin-up', 'chinup', 'sit-up', 'situp', 'crunch', 'leg raise', 'burpee', 'push-up', 'pushup', 'liegestütz', 'mountain climber'].some(t => nm.includes(t));
+};
+
 const parseSuggestedWeight = (sw?: string): number => {
   if (!sw) return 0;
   const lower = sw.toLowerCase();
@@ -853,7 +862,8 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                 {currentLog[exIdx]?.sets.map((set, sIdx) => {
                   const isDone = set.done === true;
                   const isSkipped = set.skipped === true;
-                  const hasValues = (set.weight > 0 || set.reps > 0);
+                  const isBW = isBodyweightExercise(ex);
+                  const hasValues = isBW ? set.reps > 0 : (set.weight > 0 || set.reps > 0);
                   return (
                     <div key={sIdx} className={`p-5 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border transition-all flex flex-col gap-4 sm:gap-6 group/set ${
                       isSkipped ? 'bg-red-500/5 border-red-500/20 shadow-xl' :
@@ -866,6 +876,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                         {isSkipped && <i className="fas fa-ban text-red-500 text-lg"></i>}
                       </div>
                       <div className="flex gap-4 sm:gap-6">
+                        {!isBodyweightExercise(ex) ? (
                         <div className="flex-1">
                           <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">{t.weight}</label>
                           <div className="relative">
@@ -881,6 +892,14 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
                             <span className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-600 uppercase">kg</span>
                           </div>
                         </div>
+                        ) : (
+                        <div className="flex-1 flex items-end">
+                          <div className="w-full bg-slate-900/30 rounded-xl p-3 sm:p-4 border border-white/5 flex items-center justify-center gap-2">
+                            <i className="fas fa-person text-indigo-400 text-sm"></i>
+                            <span className="font-black text-lg sm:text-xl text-indigo-300">BW</span>
+                          </div>
+                        </div>
+                        )}
                         <div className="flex-1">
                           <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">{t.reps}</label>
                           <input
