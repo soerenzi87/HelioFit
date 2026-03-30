@@ -8,7 +8,7 @@ import { HealthData } from '../types';
 import LiveSession from './workout/LiveSession';
 import WorkoutHistory from './workout/WorkoutHistory';
 import { getWorkoutTranslations } from './workout/workoutTranslations';
-import { DAYS_DE, DAYS_EN, extractDayName, parseSuggestedWeight, parseMaxReps } from './workout/workoutHelpers';
+import { DAYS_DE, DAYS_EN, extractDayName, parseSuggestedWeight, parseMaxReps, getDisplayWeight, getDisplayReps } from './workout/workoutHelpers';
 
 declare global {
   interface Window {
@@ -77,6 +77,7 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
   const [workoutAdjustInput, setWorkoutAdjustInput] = useState('');
   const [workoutDraft, setWorkoutDraft] = useState<WorkoutAdjustmentDraft | null>(null);
   const [isAdjustingWorkout, setIsAdjustingWorkout] = useState(false);
+  const [descExpanded, setDescExpanded] = useState(false);
 
   // iOS audio unlock
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -634,50 +635,108 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
               </button>
             </div>
           ) : (
-            /* ── Workout Plan View ── */
             <div className="space-y-8">
-              {/* Day selector (drag & drop) */}
-              <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-none">
-                {ALL_DAYS.map((day, idx) => {
-                  const session = sessionByDay[day];
-                  const isSelected = selectedSession?.dayTitle?.startsWith(day);
+              <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-[2rem] sm:rounded-[3rem] p-5 sm:p-10 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-6 shadow-2xl border border-indigo-400/20 relative overflow-hidden">
+                 <div className="absolute top-0 right-0 p-10 opacity-10 text-7xl sm:text-9xl pointer-events-none translate-x-4"><i className="fas fa-meteor"></i></div>
+                 <div className="relative z-10 min-w-0 flex-1">
+                   <p className="text-indigo-200 text-[10px] font-black uppercase tracking-[0.3em] mb-1 sm:mb-2">{t.activeProtocol}</p>
+                   <h3 className="text-2xl sm:text-4xl font-black tracking-tighter uppercase mb-1 break-words">{workoutProgram.title}</h3>
+                   <p
+                     className={`text-indigo-100 italic text-xs sm:text-sm opacity-80 font-medium cursor-pointer sm:cursor-default transition-all ${descExpanded ? '' : 'line-clamp-2 sm:line-clamp-none'}`}
+                     onClick={() => setDescExpanded(!descExpanded)}
+                   >
+                     {workoutProgram.description}
+                   </p>
+                   {workoutProgram.description && workoutProgram.description.length > 80 && !descExpanded && (
+                     <button onClick={() => setDescExpanded(true)} className="text-[9px] font-black text-indigo-200/60 uppercase tracking-widest mt-1 sm:hidden">
+                       <i className="fas fa-chevron-down mr-1 text-[7px]"></i>{language === 'de' ? 'Mehr' : 'More'}
+                     </button>
+                   )}
+                 </div>
+                 <div className="relative z-10 flex flex-wrap gap-2 sm:gap-3">
+                   <button onClick={onCompleteWeek} className="px-4 sm:px-8 py-2.5 sm:py-4 bg-white/20 hover:bg-white/30 rounded-xl sm:rounded-[2rem] text-[9px] sm:text-[10px] font-black uppercase tracking-widest border border-white/30 transition-all backdrop-blur-md flex items-center justify-center gap-2">
+                     <i className="fas fa-flag-checkered"></i> {t.completeWeek}
+                   </button>
+                   <button onClick={() => setShowModInput(!showModInput)} className={`px-4 sm:px-8 py-2.5 sm:py-4 rounded-xl sm:rounded-[2rem] text-[9px] sm:text-[10px] font-black uppercase tracking-widest border transition-all backdrop-blur-md flex items-center justify-center gap-2 ${showModInput ? 'bg-white/40 border-white/50 shadow-lg' : 'bg-white/20 hover:bg-white/30 border-white/30'}`}>
+                     <i className="fas fa-pen-to-square"></i> {t.modifyPlan}
+                   </button>
+                   <button onClick={() => setShowConfig(true)} className="px-4 sm:px-8 py-2.5 sm:py-4 bg-white/20 hover:bg-white/30 rounded-xl sm:rounded-[2rem] text-[9px] sm:text-[10px] font-black uppercase tracking-widest border border-white/30 transition-all backdrop-blur-md flex items-center justify-center gap-2">
+                     <i className="fas fa-sliders"></i> {t.adapt}
+                   </button>
+                 </div>
+              </div>
+
+              {showModInput && (
+                <div className="bg-[#1a1f26] rounded-[2rem] p-6 sm:p-8 border border-indigo-500/20 shadow-xl space-y-4 animate-fade-in">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-500/10 flex items-center justify-center">
+                      <i className="fas fa-pen-to-square text-indigo-400 text-sm"></i>
+                    </div>
+                    <h4 className="text-sm font-black text-indigo-400 uppercase tracking-widest">{t.modifyPlan}</h4>
+                  </div>
+                  <textarea value={modificationText} onChange={e => setModificationText(e.target.value)} placeholder={t.modifyPlaceholder}
+                    className="w-full min-h-[100px] rounded-2xl border border-white/10 bg-slate-900/60 p-4 text-sm text-white outline-none focus:border-indigo-500 placeholder:text-slate-600 resize-none"
+                  />
+                  <button onClick={() => { onGenerateWorkout(profile?.workoutPreferences?.availableDays || availableDays, profile?.workoutPreferences?.existingWorkouts || existingWorkouts, sessionDuration, modificationText.trim() || undefined); setShowModInput(false); }}
+                    disabled={!modificationText.trim()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all border border-indigo-400/20 flex items-center justify-center gap-3">
+                    <i className="fas fa-wand-magic-sparkles"></i> {t.modifySubmit}
+                  </button>
+                </div>
+              )}
+
+              {/* Day selector (7-col grid with drag & drop) */}
+              <div className="grid grid-cols-7 gap-1.5 sm:gap-2 p-2 bg-slate-800/40 border border-white/5 rounded-[2rem] w-full backdrop-blur-sm">
+                {ALL_DAYS.map((dayName, i) => {
+                  const session = sessionByDay[dayName];
+                  const hasSession = !!session;
+                  const isActive = selectedSession && selectedSession.dayTitle.split(':')[0].trim() === dayName;
+                  const isCompleted = hasSession && workoutLogs.some(l => l.sessionTitle === session!.dayTitle);
+                  const isDragging = dragIdx === i && hasSession;
+                  const isDragOver = dragOverIdx === i && dragIdx !== i;
+                  const dragSourceDay = dragIdx !== null ? ALL_DAYS[dragIdx] : null;
+                  const dragHasSession = dragSourceDay ? !!sessionByDay[dragSourceDay] : false;
                   return (
-                    <button key={day} ref={el => { dayButtonRefs.current[idx] = el; }}
-                      draggable={!!session}
-                      onDragStart={() => { if (session) setDragIdx(idx); }}
-                      onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
-                      onDragLeave={() => setDragOverIdx(null)}
-                      onDrop={() => { if (dragIdx !== null) { handleDayDrop(ALL_DAYS[dragIdx], day); } setDragOverIdx(null); }}
+                    <button key={dayName} ref={el => { dayButtonRefs.current[i] = el; }}
+                      draggable={hasSession}
+                      onDragStart={(e) => { if (!hasSession) { e.preventDefault(); return; } setDragIdx(i); e.dataTransfer.effectAllowed = 'move'; }}
+                      onDragOver={(e) => { e.preventDefault(); if (dragHasSession) setDragOverIdx(i); }}
+                      onDragLeave={() => { if (dragOverIdx === i) setDragOverIdx(null); }}
+                      onDrop={(e) => { e.preventDefault(); if (dragIdx !== null && dragSourceDay) handleDayDrop(dragSourceDay, dayName); }}
                       onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
-                      onTouchStart={(e) => { if (session) { touchStartRef.current = { idx, startX: e.touches[0].clientX, startY: e.touches[0].clientY }; } }}
+                      onTouchStart={(e) => { if (hasSession) touchStartRef.current = { idx: i, startX: e.touches[0].clientX, startY: e.touches[0].clientY }; }}
                       onTouchMove={(e) => {
                         if (!touchStartRef.current) return;
                         const touch = e.touches[0];
-                        const dx = Math.abs(touch.clientX - touchStartRef.current.startX);
-                        const dy = Math.abs(touch.clientY - touchStartRef.current.startY);
-                        if (dx > 10 && dx > dy) {
-                          const el = document.elementFromPoint(touch.clientX, touch.clientY);
-                          const btnIdx = dayButtonRefs.current.findIndex(b => b && b.contains(el));
-                          if (btnIdx >= 0 && btnIdx !== touchStartRef.current.idx) { setDragOverIdx(btnIdx); }
+                        for (let j = 0; j < dayButtonRefs.current.length; j++) {
+                          const btn = dayButtonRefs.current[j];
+                          if (btn) {
+                            const rect = btn.getBoundingClientRect();
+                            if (touch.clientX >= rect.left && touch.clientX <= rect.right && touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
+                              setDragOverIdx(j); break;
+                            }
+                          }
                         }
                       }}
                       onTouchEnd={() => {
-                        if (touchStartRef.current && dragOverIdx !== null && dragOverIdx !== touchStartRef.current.idx) {
+                        if (touchStartRef.current !== null && dragOverIdx !== null && dragOverIdx !== touchStartRef.current.idx) {
                           handleDayDrop(ALL_DAYS[touchStartRef.current.idx], ALL_DAYS[dragOverIdx]);
+                        } else if (hasSession) {
+                          setSelectedSession(session);
                         }
-                        touchStartRef.current = null;
-                        setDragOverIdx(null);
+                        touchStartRef.current = null; setDragOverIdx(null);
                       }}
-                      onClick={() => { if (session) setSelectedSession(session); }}
-                      className={`flex-shrink-0 flex flex-col items-center gap-1 px-2.5 sm:px-4 py-2 sm:py-3 rounded-xl sm:rounded-2xl border transition-all text-center min-w-[48px] sm:min-w-[64px] ${
-                        dragOverIdx === idx ? 'border-indigo-400 bg-indigo-600/20 scale-110' :
-                        isSelected ? 'bg-indigo-600 text-white border-indigo-400/40 shadow-xl shadow-indigo-600/20' :
-                        session ? 'bg-slate-800/60 text-white border-white/10 hover:border-indigo-500/30' :
-                        'bg-slate-800/20 text-slate-600 border-white/5'
-                      }`}
+                      onClick={() => { if (dragIdx === null && hasSession) setSelectedSession(session); }}
+                      className={`flex flex-col items-center gap-1 py-3 sm:py-4 rounded-2xl font-black text-[10px] sm:text-xs uppercase transition-all ${hasSession ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isDragging ? 'opacity-30 scale-90' : ''} ${isDragOver ? 'ring-2 ring-indigo-400 bg-indigo-600/20 scale-105' : ''} ${isActive ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : hasSession ? 'bg-slate-700/60 text-white hover:bg-slate-700/80 border border-white/10' : 'text-slate-600 hover:text-slate-500'}`}
                     >
-                      <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider">{SHORT_DAYS[day]}</span>
-                      {session && <div className={`w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-indigo-400'}`}></div>}
+                      <span>{SHORT_DAYS[dayName] || dayName.slice(0, 2)}</span>
+                      {hasSession ? (
+                        <div className="flex items-center gap-1">
+                          {isCompleted && <div className="bg-emerald-500 text-[7px] w-3.5 h-3.5 rounded-full flex items-center justify-center text-white"><i className="fas fa-check"></i></div>}
+                          <i className="fas fa-dumbbell text-[8px] opacity-60"></i>
+                        </div>
+                      ) : (
+                        <span className="text-[8px] opacity-30">—</span>
+                      )}
                     </button>
                   );
                 })}
@@ -685,99 +744,124 @@ const WorkoutTab: React.FC<WorkoutTabProps> = ({ workoutProgram, workoutLogs, on
 
               {/* Selected session detail */}
               {selectedSession && (
-                <div className="bg-[#1a1f26] rounded-[2rem] sm:rounded-[3.5rem] shadow-2xl p-5 sm:p-8 lg:p-14 border border-white/5 space-y-8 sm:space-y-14 animate-fade-in relative overflow-hidden">
-                  <div className="absolute top-0 right-0 p-14 opacity-5 text-9xl pointer-events-none translate-x-4"><i className="fas fa-fire text-white"></i></div>
-
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 sm:gap-6 relative z-10">
-                    <div className="space-y-2">
-                      <p className="text-indigo-500 text-[10px] font-black uppercase tracking-[0.3em]">{t.activeProtocol}</p>
-                      <h3 className="text-xl sm:text-4xl font-black text-white tracking-tighter uppercase leading-none">{selectedSession.dayTitle}</h3>
-                      <p className="text-xs sm:text-sm text-slate-500 font-medium">{selectedSession.exercises.length} {t.exercises} • {selectedSession.exercises.reduce((a, e) => a + e.sets, 0)} {t.setLabel}s</p>
+                <div className="bg-[#1a1f26] rounded-[2rem] sm:rounded-[3.5rem] p-5 sm:p-8 lg:p-14 border border-white/5 shadow-2xl animate-scale-in relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-12 opacity-5 text-9xl pointer-events-none translate-x-4"><i className="fas fa-dumbbell text-white"></i></div>
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sm:gap-8 mb-8 sm:mb-12 pb-6 sm:pb-10 border-b border-white/5 relative z-10">
+                    <div>
+                      <p className="text-indigo-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2">{selectedSession.focus}</p>
+                      <h3 className="text-2xl sm:text-4xl font-black text-white tracking-tighter uppercase">{selectedSession.dayTitle}</h3>
                     </div>
-                    <div className="flex gap-2 sm:gap-3 flex-shrink-0">
-                      <button onClick={() => setShowConfig(true)} className="w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 flex items-center justify-center transition-all" title={t.adapt}>
-                        <i className="fas fa-cog text-sm sm:text-base"></i>
-                      </button>
-                      <button onClick={() => exportWorkoutToICS(selectedSession, language)} className="w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 flex items-center justify-center transition-all" title={t.export}>
-                        <i className="fas fa-calendar-plus text-sm sm:text-base"></i>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsLiveSession(true);
-                          setLiveSessionData({ ...selectedSession });
-                          setCurrentLog(selectedSession.exercises.map(ex => ({ exerciseName: ex.name, sets: Array.from({ length: ex.sets }, () => ({ weight: 0, reps: 0 })) })));
-                          setWorkoutStartTime(Date.now());
-                        }}
-                        className="px-5 sm:px-8 py-3 sm:py-4 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-xl sm:rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-emerald-600/20 transition-all border border-emerald-400/20"
-                      >
-                        <i className="fas fa-play mr-2"></i>{t.start}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Exercise list */}
-                  <div className="space-y-4 sm:space-y-8 relative z-10">
-                    {selectedSession.exercises.map((ex, i) => (
-                      <div key={i} className="p-4 sm:p-8 bg-slate-800/30 border border-white/5 rounded-2xl sm:rounded-[2.5rem] hover:border-indigo-500/20 transition-all group">
-                        <div className="flex items-start gap-4 sm:gap-6">
-                          <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-[1.5rem] bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-black text-sm sm:text-xl flex-shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-xl">{i+1}</div>
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-sm sm:text-xl font-black text-white uppercase tracking-tight group-hover:text-indigo-400 transition-colors truncate">{ex.name}</h4>
-                            <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-6 gap-y-1 mt-2 sm:mt-3">
-                              <span className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-wider"><i className="fas fa-layer-group mr-1 sm:mr-2 text-indigo-500/50"></i>{ex.sets} × {ex.reps}</span>
-                              <span className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-wider"><i className="fas fa-clock mr-1 sm:mr-2 text-indigo-500/50"></i>{ex.rest}s {t.rest}</span>
-                              {ex.suggestedWeight && (
-                                <span className="text-[10px] sm:text-xs font-black text-amber-500/80 uppercase tracking-wider"><i className="fas fa-weight-hanging mr-1 sm:mr-2"></i>{ex.suggestedWeight}</span>
-                              )}
-                            </div>
-                            {ex.equipment && (
-                              <span className="inline-block mt-2 px-3 py-1 bg-white/5 text-slate-500 border border-white/5 rounded-lg text-[8px] sm:text-[9px] font-black uppercase tracking-widest">{ex.equipment}</span>
-                            )}
-                            {ex.notes && <p className="text-[10px] sm:text-xs text-slate-500 mt-2 sm:mt-3 font-medium italic">{ex.notes}</p>}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Cardio recommendations */}
-                  {selectedSession.cardioRecommendations && selectedSession.cardioRecommendations.length > 0 && (
-                    <div className="space-y-4 relative z-10">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-orange-600/10 border border-orange-500/20 flex items-center justify-center">
-                          <i className="fas fa-heart-pulse text-orange-400 text-xs"></i>
-                        </div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t.cardioTitle}</p>
-                      </div>
-                      {selectedSession.cardioRecommendations.map((c, i) => (
-                        <div key={i} className="p-4 bg-orange-500/5 border border-orange-500/10 rounded-2xl flex items-center gap-4">
-                          <div className="w-10 h-10 bg-orange-500/10 rounded-xl flex items-center justify-center text-orange-400"><i className="fas fa-person-running"></i></div>
-                          <div>
-                            <p className="text-sm font-black text-white">{c.type}</p>
-                            <p className="text-[10px] text-slate-400 font-bold">{c.duration} • {c.intensity}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Warmup */}
-                  {selectedSession.warmup && (
-                    <div className="p-5 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl relative z-10">
-                      <div className="flex items-center gap-2 mb-2"><i className="fas fa-fire-flame-curved text-emerald-400 text-xs"></i><p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">{t.warmup}</p></div>
-                      <p className="text-sm text-slate-300 font-medium">{selectedSession.warmup}</p>
-                    </div>
-                  )}
-
-                  {/* Complete week */}
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 relative z-10">
-                    <button
-                      onClick={onCompleteWeek}
-                      className="flex-1 py-4 sm:py-5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-[1.5rem] sm:rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-xl shadow-violet-600/20 transition-all border border-violet-400/20"
+                    <button onClick={() => { setLiveSessionData(null); setIsLiveSession(true); setWorkoutStartTime(Date.now()); setSessionNotes(''); setCurrentLog(selectedSession.exercises.map(ex => ({ exerciseName: ex.name, sets: Array.from({ length: ex.sets }, () => ({ weight: 0, reps: 0 })) }))); }}
+                      className="px-6 sm:px-12 py-4 sm:py-6 bg-slate-900 text-white rounded-xl sm:rounded-[2rem] font-black uppercase text-sm tracking-widest shadow-2xl hover:bg-slate-950 hover:shadow-indigo-500/10 transition-all border border-white/10 flex items-center gap-4 group"
                     >
-                      <i className="fas fa-flag-checkered"></i> {t.completeWeek}
+                      <i className="fas fa-play text-indigo-500 group-hover:scale-125 transition-transform"></i> {t.start}
                     </button>
                   </div>
+
+                  {selectedSession.warmup && (typeof selectedSession.warmup === 'string' ? selectedSession.warmup.length > 0 : selectedSession.warmup.length > 0) && (
+                    <div className="mb-8 p-5 sm:p-6 bg-amber-500/5 border border-amber-500/10 rounded-[2rem] relative z-10">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center"><i className="fas fa-fire-flame-curved text-amber-400 text-sm"></i></div>
+                        <h4 className="text-sm font-black text-amber-400 uppercase tracking-widest">{t.warmup}</h4>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {(Array.isArray(selectedSession.warmup) ? selectedSession.warmup : [selectedSession.warmup]).map((step, wi) => (
+                          <span key={wi} className="px-3.5 py-2 bg-amber-500/10 border border-amber-500/15 rounded-xl text-xs font-semibold text-slate-300">{step}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 relative z-10">
+                    {(() => {
+                      const sessionLog = workoutLogs.find(l => l.sessionTitle === selectedSession.dayTitle);
+                      const loggedNames = new Set(sessionLog?.exercises.map(e => e.exerciseName) || []);
+                      const planNames = new Set(selectedSession.exercises.map(e => e.name));
+                      const displayExercises: { ex: Exercise; exerciseLog?: ExerciseLog; wasSwapped?: boolean }[] = [];
+                      for (const ex of selectedSession.exercises) {
+                        const eLog = sessionLog?.exercises.find(le => le.exerciseName === ex.name);
+                        if (eLog) {
+                          displayExercises.push({ ex, exerciseLog: eLog });
+                        } else if (sessionLog && !loggedNames.has(ex.name)) {
+                          const idx = selectedSession.exercises.indexOf(ex);
+                          const swappedLog = sessionLog.exercises[idx];
+                          if (swappedLog && !planNames.has(swappedLog.exerciseName)) {
+                            const swappedEx: Exercise = { name: swappedLog.exerciseName, sets: swappedLog.sets.length, reps: '-', rest: 0, notes: '' };
+                            displayExercises.push({ ex: swappedEx, exerciseLog: swappedLog, wasSwapped: true });
+                          } else {
+                            displayExercises.push({ ex });
+                          }
+                        } else {
+                          displayExercises.push({ ex, exerciseLog: sessionLog?.exercises.find(le => le.exerciseName === ex.name) });
+                        }
+                      }
+                      if (sessionLog) {
+                        for (const el of sessionLog.exercises) {
+                          if (!displayExercises.some(d => d.ex.name === el.exerciseName)) {
+                            displayExercises.push({ ex: { name: el.exerciseName, sets: el.sets.length, reps: '-', rest: 0, notes: '' }, exerciseLog: el, wasSwapped: true });
+                          }
+                        }
+                      }
+                      return displayExercises.map(({ ex, exerciseLog, wasSwapped }, i) => (
+                        <div key={i} className={`bg-slate-800/30 p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border hover:bg-slate-800/50 hover:border-white/10 transition-all flex flex-col gap-5 group ${wasSwapped ? 'border-amber-500/20' : 'border-white/5'}`}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <h5 className="font-black text-white text-base sm:text-xl tracking-tight uppercase leading-tight group-hover:text-indigo-400 transition-colors">{ex.name}</h5>
+                              {wasSwapped && <span className="inline-block mt-1 px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg text-[8px] font-black uppercase tracking-widest"><i className="fas fa-shuffle mr-1"></i>{language === 'de' ? 'Getauscht' : 'Swapped'}</span>}
+                              {ex.notes && <p className="text-[10px] text-slate-500 italic mt-2 font-medium leading-relaxed line-clamp-2">{ex.notes}</p>}
+                            </div>
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-indigo-600/10 text-indigo-500 rounded-xl sm:rounded-2xl flex items-center justify-center text-lg sm:text-xl border border-indigo-500/10 shrink-0"><i className="fas fa-dumbbell"></i></div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                            <div className="bg-slate-900/50 p-3 sm:p-4 rounded-xl sm:rounded-2xl text-center border border-white/5">
+                              <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">Sets</p>
+                              <p className="font-black text-white text-base sm:text-lg tracking-tight">{ex.sets}</p>
+                            </div>
+                            <div className="bg-slate-900/50 p-3 sm:p-4 rounded-xl sm:rounded-2xl text-center border border-white/5">
+                              <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">Reps</p>
+                              <p className="font-black text-white text-base sm:text-lg tracking-tight">{ex.reps}</p>
+                            </div>
+                            <div className="bg-slate-900/50 p-3 sm:p-4 rounded-xl sm:rounded-2xl text-center border border-white/5">
+                              <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">{t.rest}</p>
+                              <p className="font-black text-white text-base sm:text-lg tracking-tight">{ex.rest}s</p>
+                            </div>
+                          </div>
+                          {exerciseLog && (
+                            <div className="pt-4 sm:pt-6 border-t border-white/5 mt-auto">
+                              <div className="flex items-center justify-between mb-3 sm:mb-4">
+                                <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest flex items-center gap-2"><i className="fas fa-history"></i> {t.prTracker}</p>
+                                <span className="text-[8px] font-black text-slate-500 uppercase">{t.lastResult}</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                                {exerciseLog.sets.map((s, si) => (
+                                  <div key={si} className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[9px] sm:text-[10px] font-black border transition-colors ${s.skipped ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'}`}>
+                                    {s.skipped ? `S${si+1}: -` : `S${si+1}: ${getDisplayWeight(s)} × ${getDisplayReps(s)}`}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+
+                  {workoutProgram.cardioRecommendations && workoutProgram.cardioRecommendations.length > 0 && (
+                    <div className="mt-8 p-5 sm:p-6 bg-rose-500/5 border border-rose-500/10 rounded-[2rem] relative z-10">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-8 h-8 rounded-xl bg-rose-500/10 flex items-center justify-center"><i className="fas fa-heart-pulse text-rose-400 text-sm"></i></div>
+                        <h4 className="text-sm font-black text-rose-400 uppercase tracking-widest">{t.cardioTitle}</h4>
+                      </div>
+                      <div className="space-y-2">
+                        {workoutProgram.cardioRecommendations.map((tip, i) => (
+                          <div key={i} className="flex items-start gap-3 p-3 bg-rose-500/5 border border-rose-500/10 rounded-xl">
+                            <span className="text-rose-400 font-black text-xs mt-0.5">{i + 1}</span>
+                            <p className="text-slate-300 text-xs font-medium leading-relaxed">{tip}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
