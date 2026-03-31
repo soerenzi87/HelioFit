@@ -333,7 +333,7 @@ const Dashboard: React.FC<DashboardProps> = ({ analysis, progressAnalysis, profi
                     <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-xs"><i className="fas fa-bullseye"></i></div>
                     <p className="text-[10px] text-indigo-400 font-black uppercase tracking-widest">{t.recommended}</p>
                   </div>
-                  <p className="font-black text-xl sm:text-2xl text-indigo-400">{(analysis.targets.maintenanceCalories || 0) + (profile.calorieAdjustment || 0)} <span className="text-[10px] text-indigo-500/60 uppercase tracking-widest">kcal</span></p>
+                  <p className="font-black text-xl sm:text-2xl text-indigo-400">{(analysis.targets.calories || 0) + (profile.calorieAdjustment || 0)} <span className="text-[10px] text-indigo-500/60 uppercase tracking-widest">kcal</span></p>
                 </div>
               </div>
 

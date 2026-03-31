@@ -415,7 +415,16 @@ const App: React.FC = () => {
                         setIsGeneratingPlan(true);
                         try {
                           const profileWithPrefs = { ...profile, nutritionPreferences: pfs };
-                          const pl = await generateMealPlan(profileWithPrefs, analysis?.targets, pfs, language, modification);
+                          // Apply calorieAdjustment to targets so meal plan matches dashboard
+                          const adj = profile.calorieAdjustment || 0;
+                          const adjustedTargets = analysis?.targets && adj !== 0 ? {
+                            ...analysis.targets,
+                            calories: analysis.targets.calories + adj,
+                            protein: Math.round(analysis.targets.protein * (1 + adj / analysis.targets.calories)),
+                            carbs: Math.round(analysis.targets.carbs * (1 + adj / analysis.targets.calories)),
+                            fats: Math.round(analysis.targets.fats * (1 + adj / analysis.targets.calories)),
+                          } : analysis?.targets;
+                          const pl = await generateMealPlan(profileWithPrefs, adjustedTargets, pfs, language, modification);
                           setWeeklyPlan(pl);
 
                           const dbKey = getDbKey(profile);
@@ -451,7 +460,17 @@ const App: React.FC = () => {
                       isLoading={isGeneratingPlan}
                       language={language}
                       profile={profile}
-                      targets={analysis?.targets}
+                      targets={(() => {
+                        const adj = profile.calorieAdjustment || 0;
+                        if (!analysis?.targets || adj === 0) return analysis?.targets;
+                        return {
+                          ...analysis.targets,
+                          calories: analysis.targets.calories + adj,
+                          protein: Math.round(analysis.targets.protein * (1 + adj / analysis.targets.calories)),
+                          carbs: Math.round(analysis.targets.carbs * (1 + adj / analysis.targets.calories)),
+                          fats: Math.round(analysis.targets.fats * (1 + adj / analysis.targets.calories)),
+                        };
+                      })()}
                       onUpdateProfile={(up) => {
                         setProfile(up);
                         setDb(prev => ({...prev, [getDbKey(up)]: {...prev[getDbKey(up)], profile: up}}));
