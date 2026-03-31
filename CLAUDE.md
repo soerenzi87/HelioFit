@@ -13,6 +13,7 @@
 - **Deploy-Befehl:** `python3 deploy.py` — baut Docker Image remote und startet Container
 - **Prod-Server:** 192.168.68.132:8080 (nur lokal erreichbar, via Cloudflare nach außen)
 - **Vor jedem Deploy:** `npx tsc --noEmit` ausführen — nie deployen wenn Types fehlschlagen
+- **Pre-push Hook:** `.git/hooks/pre-push` blockiert Push bei Type-Fehlern automatisch
 - **GitHub Actions:** Gibt es NICHT — der Server ist lokal, nicht von GitHub erreichbar
 - Reihenfolge: Code ändern → `npx tsc --noEmit` → `python3 deploy.py` → git commit/push
 
@@ -22,9 +23,11 @@
   - NIEMALS `profile.name` direkt als Key nutzen — führt zu Datenverlust!
 - **Zugriffspfad:** `data->'email@example.com'->'workoutLogs'` etc.
 - **Connection:** DB: `heliofit_db`, User: `heliofit`, Container: `heliofit-db`
-- **Save-Mechanismus:** 500ms debounced via `saveTimerRef` und `dbRef` in App.tsx
+- **Save-Mechanismus:** 500ms debounced via `useDbSave()` Hook (`hooks/useDatabase.ts`)
   - Bei State-Änderungen IMMER `setDb()` aufrufen, sonst gehen Daten verloren
 - **Reset-Endpoint:** `/api/db/reset` für intentionales Löschen (umgeht Leer-Wert-Schutz)
+- **Backup:** Täglicher pg_dump Cronjob um 3:00 Uhr auf Proxmox, 14-Tage-Rotation
+  - Script: `/opt/heliofit/backup.sh`, Backups: `/opt/heliofit/backups/`
 
 ### DB Safety Regeln
 - **Vor jedem UPDATE/DELETE:** Erst SELECT ausführen und Ergebnis dem User zeigen
@@ -32,19 +35,60 @@
 - **Bulk-Operationen:** Erst Dry-Run (SELECT mit Zählung), dann User bestätigen lassen
 - Datenverlust ist der schlimmste Bug — lieber einmal zu viel fragen als Daten löschen
 
+## Architektur & Modulare Entwicklung
+
+### Prinzip: Kleine, fokussierte Dateien
+Neue Features IMMER modular aufbauen — nicht in bestehende große Dateien reinschreiben:
+- **Translations** in eigene Datei: `components/<tab>/tabTranslations.ts`
+- **Helpers/Constants** extrahieren: `components/<tab>/tabHelpers.ts`
+- **Sub-Components** für abgrenzbare UI-Bereiche: `components/<tab>/SubComponent.tsx`
+- **Hooks** für wiederverwendbare Logik: `hooks/useXyz.ts`
+- **Shared Components** für wiederkehrende Patterns: `components/shared/`
+
+### Warum modular?
+- Jede Datei >500 Zeilen kostet bei jeder Änderung tausende Tokens zum Lesen
+- Kleine Dateien können gezielt gelesen und geändert werden
+- Translations und Helpers ändern sich selten → müssen nicht mitgelesen werden
+
+### Split-Pattern (bewährt)
+1. Translations raus → `*Translations.ts` (Record<keyof typeof de, string> Pattern)
+2. Constants/Helpers raus → `*Helpers.ts`
+3. Abgrenzbare Sub-Components raus (nur wenn Props-Interface übersichtlich bleibt)
+4. Thin Container behält State + Wiring, importiert alles andere
+
+### Wann NICHT splitten
+- Wenn Sub-Component >10 Props aus Parent-Closures braucht → besser inline lassen
+- Beispiel: `BodyCompositionVisual` in HealthTab (zu viele Abhängigkeiten)
+
 ## Dateistruktur & Größe
 
-### Große Dateien (Token-intensiv beim Lesen)
+### Hauptdateien
 | Datei | Zeilen | Inhalt |
 |---|---|---|
-| `components/WorkoutTab.tsx` | ~2140 | Workout UI, Live-Tracking, Historie, Recovery |
-| `components/NutritionTab.tsx` | ~1986 | Ernährungsplan, Mahlzeiten, Kalorien |
-| `components/HealthTab.tsx` | ~1660 | Health-Metriken, Schlaf, Schritte, Graphen |
-| `App.tsx` | ~1260 | State Management, Auth, DB Sync, Routing |
-| `components/SettingsTab.tsx` | ~1066 | Profil, Push, HealthBridge-Einstellungen |
+| `App.tsx` | ~390 | State-Deklarationen, Hook-Wiring, JSX-Shell |
+| `components/WorkoutTab.tsx` | ~720 | Workout Container (Sub-Components in `workout/`) |
+| `components/NutritionTab.tsx` | ~1430 | Ernährungsplan Container (Sub-Components in `nutrition/`) |
+| `components/HealthTab.tsx` | ~1475 | Health-Metriken, Graphen (Translations extrahiert) |
+| `components/SettingsTab.tsx` | ~870 | Profil, Push, HealthBridge (Translations extrahiert) |
 | `components/Dashboard.tsx` | ~760 | Übersicht, Tagesziele, Quick-Stats |
 
 → Bei Änderungen gezielt mit `offset`/`limit` lesen, nicht ganze Datei
+
+### Hooks (aus App.tsx extrahiert)
+| Hook | Zweck |
+|---|---|
+| `hooks/useAuth.ts` | Session Restore, Login, Register, Logout |
+| `hooks/useDatabase.ts` | `getDbKey()`, debounced DB-Save |
+| `hooks/useAppHandlers.ts` | Alle Handler (Health Sync, Workout, Nutrition, Recovery) |
+
+### Sub-Component Verzeichnisse
+| Verzeichnis | Inhalt |
+|---|---|
+| `components/workout/` | LiveSession, WorkoutHistory, WorkoutEngine, Translations, Helpers |
+| `components/nutrition/` | NutritionHistory, NutritionModals, Translations, Helpers |
+| `components/health/` | healthTranslations |
+| `components/settings/` | settingsTranslations |
+| `components/shared/` | ModalWrapper (wiederverwendbarer Modal-Overlay) |
 
 ### Services (Business Logic)
 | Service | Zweck |
@@ -61,11 +105,21 @@
 - `routes/healthbridge/` — HealthBridge API (sync, tokens, scale, query)
 
 ## UI & i18n
-- **Sprachen:** DE + EN, umschaltbar, über `t`-Objekte in jeder Komponente (kein i18n-Framework)
+- **Sprachen:** DE + EN, umschaltbar, über `t`-Objekte (kein i18n-Framework)
+- **Translation-Pattern:** `const t = getXyzTranslations(language)` aus separater Datei
+  - Type: `Record<keyof typeof de, string>` — vermeidet Literal-Type-Konflikte zwischen DE/EN
+  - Maps (sourcesMap, goalsMap etc.) als `Record<string, string>` typen
 - **Design:** Dark Theme, Tailwind Utility Classes, abgerundete Karten
 - **Mobile:** Optimiert für 375px (iPhone SE Mindestbreite)
 - **Icons:** FontAwesome (`fas fa-*`)
 - Bei neuen UI-Texten IMMER beide Sprachen im `t`-Objekt ergänzen
+
+## Code-Splitting & Performance
+- **React.lazy** für alle Tab-Components (Dashboard, Nutrition, Workout, Health, Settings, Admin, UserProfileForm)
+- `<Suspense>` Wrapper mit Spinner-Fallback um jeden lazy-loaded Bereich
+- **WorkoutTab** bleibt immer mounted (`display: block/none`) — Timer-State darf nicht verloren gehen
+- **Bundle:** Initial ~770 kB, Tabs werden on-demand nachgeladen (je 8-84 kB)
+- Neue Tabs/große Komponenten IMMER als lazy-loaded Component anlegen
 
 ## Bekannte Patterns & Konventionen
 - **Bodyweight-Übungen:** Erkennung über `suggestedWeight` ("Körpergewicht"/"BW"), `equipment` ("Ohne"), oder Übungsname
