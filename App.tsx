@@ -139,6 +139,22 @@ const App: React.FC = () => {
     language, t,
   });
 
+  /** Compute targets adjusted by user's calorie slider (based on maintenanceCalories/TDEE) */
+  const getAdjustedTargets = () => {
+    if (!analysis?.targets) return undefined;
+    const adj = profile?.calorieAdjustment || 0;
+    if (adj === 0) return analysis.targets;
+    const targetCal = analysis.targets.maintenanceCalories + adj;
+    const ratio = targetCal / analysis.targets.calories;
+    return {
+      ...analysis.targets,
+      calories: targetCal,
+      protein: Math.round(analysis.targets.protein * ratio),
+      carbs: Math.round(analysis.targets.carbs * ratio),
+      fats: Math.round(analysis.targets.fats * ratio),
+    };
+  };
+
   return (
     <>
       {showSplash && <SplashScreen language={language} onFinished={() => setShowSplash(false)} />}
@@ -415,16 +431,7 @@ const App: React.FC = () => {
                         setIsGeneratingPlan(true);
                         try {
                           const profileWithPrefs = { ...profile, nutritionPreferences: pfs };
-                          // Apply calorieAdjustment to targets so meal plan matches dashboard
-                          const adj = profile.calorieAdjustment || 0;
-                          const adjustedTargets = analysis?.targets && adj !== 0 ? {
-                            ...analysis.targets,
-                            calories: analysis.targets.calories + adj,
-                            protein: Math.round(analysis.targets.protein * (1 + adj / analysis.targets.calories)),
-                            carbs: Math.round(analysis.targets.carbs * (1 + adj / analysis.targets.calories)),
-                            fats: Math.round(analysis.targets.fats * (1 + adj / analysis.targets.calories)),
-                          } : analysis?.targets;
-                          const pl = await generateMealPlan(profileWithPrefs, adjustedTargets, pfs, language, modification);
+                          const pl = await generateMealPlan(profileWithPrefs, getAdjustedTargets(), pfs, language, modification);
                           setWeeklyPlan(pl);
 
                           const dbKey = getDbKey(profile);
@@ -460,17 +467,7 @@ const App: React.FC = () => {
                       isLoading={isGeneratingPlan}
                       language={language}
                       profile={profile}
-                      targets={(() => {
-                        const adj = profile.calorieAdjustment || 0;
-                        if (!analysis?.targets || adj === 0) return analysis?.targets;
-                        return {
-                          ...analysis.targets,
-                          calories: analysis.targets.calories + adj,
-                          protein: Math.round(analysis.targets.protein * (1 + adj / analysis.targets.calories)),
-                          carbs: Math.round(analysis.targets.carbs * (1 + adj / analysis.targets.calories)),
-                          fats: Math.round(analysis.targets.fats * (1 + adj / analysis.targets.calories)),
-                        };
-                      })()}
+                      targets={getAdjustedTargets()}
                       onUpdateProfile={(up) => {
                         setProfile(up);
                         setDb(prev => ({...prev, [getDbKey(up)]: {...prev[getDbKey(up)], profile: up}}));
